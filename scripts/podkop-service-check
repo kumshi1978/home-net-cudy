@@ -5,18 +5,17 @@
 
 TAG="podkop-service-check"
 
-log() {
-    logger -t "$TAG" "$*"
-}
-
 check_country() {
     NAME="$1"
     IFACE="$2"
 
+    ip link show "$IFACE" >/dev/null 2>&1 || {
+        echo "--- $NAME ($IFACE) SKIPPED ---"
+        return 0
+    }
+
     echo "--- $NAME ($IFACE) ---"
-
     COUNTRY=$(curl -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null)
-
     echo "Country: $COUNTRY"
 
     if [ "$COUNTRY" = "RU" ] || [ -z "$COUNTRY" ]; then
@@ -31,34 +30,19 @@ check_country() {
 check_url() {
     NAME="$1"
     URL="$2"
-
     printf "%-18s " "$NAME"
-
     CODE=$(curl -4 -L -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 20 "$URL")
-
     case "$CODE" in
-        200|301|302|401|403)
-            echo "OK ($CODE)"
-            return 0
-            ;;
-        *)
-            echo "FAIL ($CODE)"
-            return 1
-            ;;
+        200|301|302|401|403) echo "OK ($CODE)"; return 0 ;;
+        *) echo "FAIL ($CODE)"; return 1 ;;
     esac
 }
 
 FAIL=0
-
 check_country "AWG MAIN" awg_main || FAIL=1
 check_country "AWG BACKUP" awg_backup || FAIL=1
 
-for URL in \
-    "https://github.com" \
-    "https://api.github.com" \
-    "https://raw.githubusercontent.com" \
-    "https://unifi.ui.com" \
-    "https://claude.ai"
+for URL in https://github.com https://api.github.com https://raw.githubusercontent.com https://unifi.ui.com https://claude.ai
 do
     check_url "$URL" "$URL" || FAIL=1
 done
