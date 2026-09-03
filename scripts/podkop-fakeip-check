@@ -1,0 +1,28 @@
+#!/bin/sh
+# HOME NET Cudy
+# Проверка FakeIP DNS от Podkop/sing-box
+# Версия: 1.3.9
+
+check_fakeip() {
+    HOST="$1"
+
+    IP=$(nslookup "$HOST" 127.0.0.1 2>/dev/null | awk '/Address: 198\.18\./ {print $2; exit}')
+
+    if [ -n "$IP" ]; then
+        echo "$HOST OK $IP"
+        return 0
+    else
+        echo "$HOST FAIL"
+        return 1
+    fi
+}
+
+FAIL=0
+
+# Домены, которые должны получать FakeIP
+check_fakeip github.com || FAIL=1
+check_fakeip unifi.ui.com || FAIL=1
+check_fakeip claude.ai || FAIL=1
+check_fakeip gemini.google.com || FAIL=1
+
+exit $FAIL
