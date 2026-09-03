@@ -1,0 +1,33 @@
+#!/bin/sh
+# HOME NET Cudy
+# Монитор изменений состояния Podkop / sing-box / AmneziaWG
+# Версия: 1.4.0-dev
+#
+# Первый этап Event Monitor.
+# Не выполняет восстановление сервисов.
+# Только фиксирует переходы состояний.
+
+LOG_DIR="/tmp/podkop-service-health"
+STATE_FILE="$LOG_DIR/state"
+PREVIOUS_STATE="$LOG_DIR/previous_state"
+EVENT_LOG="$LOG_DIR/events.log"
+
+mkdir -p "$LOG_DIR"
+
+if [ ! -f "$STATE_FILE" ]; then
+    exit 0
+fi
+
+CURRENT=$(grep '^STATUS=' "$STATE_FILE")
+
+if [ -f "$PREVIOUS_STATE" ]; then
+    PREVIOUS=$(cat "$PREVIOUS_STATE")
+else
+    PREVIOUS=""
+fi
+
+if [ "$CURRENT" != "$PREVIOUS" ]; then
+    echo "$(date '+%F %T') STATE CHANGE: $PREVIOUS -> $CURRENT" >> "$EVENT_LOG"
+fi
+
+printf "%s" "$CURRENT" > "$PREVIOUS_STATE"
