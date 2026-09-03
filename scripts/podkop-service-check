@@ -1,0 +1,111 @@
+#!/bin/sh
+# HOME NET Cudy
+# Проверка состояния Podkop, AmneziaWG и доступности сервисов
+# Версия: 1.3.9
+
+TAG="podkop-service-check"
+
+log() {
+    logger -t "$TAG" "$*"
+}
+
+echo "================================"
+echo " HOME NET SERVICE CHECK v2"
+echo "================================"
+echo
+
+check_country()
+{
+    NAME="$1"
+    IFACE="$2"
+
+    echo "--- $NAME ($IFACE) ---"
+
+    IP=$(curl -4 \
+        --interface "$IFACE" \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ifconfig.me/ip 2>/dev/null)
+
+    COUNTRY=$(curl -4 \
+        --interface "$IFACE" \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ipinfo.io/country 2>/dev/null)
+
+    echo "IP:      $IP"
+    echo "Country: $COUNTRY"
+
+    if [ "$COUNTRY" = "RU" ] || [ -z "$COUNTRY" ]; then
+        echo "STATUS: FAIL"
+        return 1
+    else
+        echo "STATUS: OK"
+    fi
+
+    echo
+}
+
+check_url()
+{
+    NAME="$1"
+    URL="$2"
+
+    printf "%-18s " "$NAME"
+
+    CODE=$(curl -4 \
+        -L \
+        -s \
+        -o /dev/null \
+        -w "%{http_code}" \
+        --connect-timeout 10 \
+        --max-time 20 \
+        "$URL")
+
+    case "$CODE" in
+        200|301|302|401|403)
+            echo "OK ($CODE)" ;;
+        *)
+            echo "FAIL ($CODE)" ;;
+    esac
+}
+
+echo "===== VPN TUNNELS ====="
+echo
+
+check_country "AWG MAIN" awg_main
+check_country "AWG BACKUP" awg_backup
+
+echo "===== PODKOP ROUTING ====="
+echo
+
+echo "DNS check:"
+echo
+
+for d in github.com unifi.ui.com ui.com claude.ai gemini.google.com huggingface.co perplexity.ai
+do
+    echo -n "$d -> "
+    nslookup "$d" 127.0.0.1 2>/dev/null | grep Address | tail -1
+done
+
+echo
+echo "HTTP checks via Podkop:"
+echo
+
+check_url "GitHub" "https://github.com"
+check_url "GitHub API" "https://api.github.com"
+check_url "GitHub RAW" "https://raw.githubusercontent.com"
+
+check_url "UniFi" "https://unifi.ui.com"
+check_url "Ubiquiti" "https://ui.com"
+
+# OpenAI специально не проверяем:
+# частые проверки могут влиять на стабильность работы ChatGPT.
+check_url "Anthropic" "https://claude.ai"
+check_url "Google AI" "https://gemini.google.com"
+check_url "HuggingFace" "https://huggingface.co"
+check_url "Perplexity" "https://perplexity.ai"
+
+echo
+echo "===== RESULT ====="
+echo "HOME NET CHECK COMPLETE"
