@@ -5,22 +5,34 @@
 
 set -e
 
-BASE_DIR="$(dirname "$0")"
+BASE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+fail() {
+    echo "Ошибка: $*"
+    exit 1
+}
+
+[ -d /etc/openwrt_release ] || fail "Не обнаружен OpenWrt"
 
 check_file() {
-    [ -f "$1" ] || {
-        echo "Ошибка: отсутствует файл $1"
-        exit 1
-    }
+    [ -f "$1" ] || fail "отсутствует файл $1"
 }
 
 check_file "$BASE_DIR/../scripts/podkop-service-health-daemon"
 check_file "$BASE_DIR/../scripts/podkop-service-check"
+check_file "$BASE_DIR/../scripts/podkop-fakeip-check"
+check_file "$BASE_DIR/../init.d/podkop-service-health"
 
 mkdir -p /root/backup-podkop-install
 
-cp -p /usr/bin/podkop-service-health-daemon /root/backup-podkop-install/ 2>/dev/null || true
-cp -p /usr/bin/podkop-service-check /root/backup-podkop-install/ 2>/dev/null || true
+for FILE in \
+    /usr/bin/podkop-service-health-daemon \
+    /usr/bin/podkop-service-check \
+    /usr/bin/podkop-fakeip-check \
+    /etc/init.d/podkop-service-health
+ do
+    [ -f "$FILE" ] && cp -p "$FILE" /root/backup-podkop-install/
+done
 
 cp "$BASE_DIR/../scripts/"* /usr/bin/
 cp "$BASE_DIR/../init.d/podkop-service-health" /etc/init.d/
@@ -28,7 +40,11 @@ cp "$BASE_DIR/../init.d/podkop-service-health" /etc/init.d/
 chmod +x /usr/bin/podkop-*
 chmod +x /etc/init.d/podkop-service-health
 
+sh -n /usr/bin/podkop-service-health-daemon
+sh -n /usr/bin/podkop-service-check
+sh -n /usr/bin/podkop-fakeip-check
+
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
 
-echo "HOME NET Podkop Monitor installed"
+echo "HOME NET Podkop Monitor v1.4.0-dev installed"
