@@ -1,14 +1,16 @@
 #!/bin/sh
 # HOME NET Cudy
-# Обвязка запуска Event Monitor
-# Версия: 1.4.0-dev
+# Event Runner dispatcher
+# Версия: 1.4.1-dev
 #
-# Вызывается после обновления state-файла.
-# Не выполняет восстановление сервисов.
-# Только передает управление модулю событий.
+# Не выполняет recovery.
+# Передает события отдельным обработчикам в будущем.
 
 EVENT_MONITOR="/usr/bin/podkop-event-monitor"
 
-if [ -x "$EVENT_MONITOR" ]; then
-    "$EVENT_MONITOR"
-fi
+run_monitor() {
+    [ -x "$EVENT_MONITOR" ] && "$EVENT_MONITOR"
+}
+
+run_monitor
+exit $?
