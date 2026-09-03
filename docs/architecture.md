@@ -1,60 +1,52 @@
-# HOME NET Cudy architecture
+# Архитектура HOME NET
 
-## Purpose
+## Общая схема
 
-Centralized management repository for HOME NET Cudy/OpenWrt routers.
-
-GitHub is the source of truth for:
-- scripts
-- configuration templates
-- documentation
-- version history
-
-## Network stack
-
-```text
-Internet
+```
+Интернет
    |
-Cudy OpenWrt
+ Cudy OpenWrt
    |
-AmneziaWG (awg_main / awg_backup)
+ AmneziaWG (awg_main / awg_backup)
    |
-Podkop
+ Podkop
    |
-sing-box
+ sing-box
    |
-LAN clients
+ Локальная сеть
 ```
 
-## Monitoring stack
+## Состав мониторинга
 
-The monitoring service consists of:
+Система контролирует:
 
-- podkop-service-health-daemon
-- podkop-service-check
-- podkop-fakeip-check
+- активный VPN интерфейс;
+- awg_main и awg_backup;
+- внешний IP через VPN;
+- страну выхода VPN;
+- прямой WAN IP;
+- состояние sing-box;
+- состояние Podkop;
+- FakeIP DNS ответы.
 
-Checks:
+## Принцип управления
 
-- active VPN interface
-- AWG main and backup tunnels
-- VPN exit country is not RU
-- direct WAN country detection
-- sing-box process
-- Podkop routing
-- FakeIP DNS responses
-- required external services
+GitHub является источником истины для:
 
-## Deployment model
+- скриптов;
+- шаблонов конфигурации;
+- документации;
+- истории версий.
 
-Workflow:
+Рабочий процесс:
 
-GitHub -> test Cudy -> rollout to remaining Cudy routers
+```
+GitHub -> тестовый Cudy -> остальные Cudy
+```
 
-Target devices:
-- dacha Cudy routers
-- apartment Cudy routers
+Целевые устройства:
 
-OpenWrt 24.x and 25.x compatibility must be checked before rollout.
+- Cudy на даче;
+- Cudy в квартире.
 
-Local differences are documented separately and should not modify the common base configuration.
+Перед распространением изменений проверяется совместимость OpenWrt 24.x и 25.x.
