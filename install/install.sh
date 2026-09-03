@@ -6,6 +6,8 @@
 set -e
 
 BASE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+CONF_SRC="$BASE_DIR/../configs/podkop-service-check.conf.example"
+CONF_DST="/etc/podkop-service-check.conf"
 
 fail() {
     echo "Ошибка: $*"
@@ -24,7 +26,8 @@ for FILE in \
     "$BASE_DIR/../scripts/podkop-fakeip-check" \
     "$BASE_DIR/../scripts/podkop-event-monitor" \
     "$BASE_DIR/../scripts/podkop-event-runner" \
-    "$BASE_DIR/../init.d/podkop-service-health"
+    "$BASE_DIR/../init.d/podkop-service-health" \
+    "$CONF_SRC"
 do
     check_file "$FILE"
 done
@@ -37,13 +40,18 @@ for FILE in \
     /usr/bin/podkop-fakeip-check \
     /usr/bin/podkop-event-monitor \
     /usr/bin/podkop-event-runner \
-    /etc/init.d/podkop-service-health
+    /etc/init.d/podkop-service-health \
+    "$CONF_DST"
 do
     [ -f "$FILE" ] && cp -p "$FILE" /root/backup-podkop-install/
 done
 
 cp "$BASE_DIR/../scripts/"* /usr/bin/
 cp "$BASE_DIR/../init.d/podkop-service-health" /etc/init.d/
+
+if [ ! -f "$CONF_DST" ]; then
+    cp "$CONF_SRC" "$CONF_DST"
+fi
 
 chmod +x /usr/bin/podkop-*
 chmod +x /etc/init.d/podkop-service-health
