@@ -1,7 +1,13 @@
 #!/bin/sh
 # HOME NET Cudy
 # Проверка FakeIP DNS от Podkop/sing-box
-# Версия: 1.3.9
+# Версия: 1.4.1-dev
+
+CONF="/etc/podkop-service-check.conf"
+
+[ -r "$CONF" ] && . "$CONF"
+
+FAKEIP_DOMAINS="${FAKEIP_DOMAINS:-github.com unifi.ui.com claude.ai gemini.google.com}"
 
 check_fakeip() {
     HOST="$1"
@@ -11,18 +17,17 @@ check_fakeip() {
     if [ -n "$IP" ]; then
         echo "$HOST OK $IP"
         return 0
-    else
-        echo "$HOST FAIL"
-        return 1
     fi
+
+    echo "$HOST FAIL"
+    return 1
 }
 
 FAIL=0
 
-# Домены, которые должны получать FakeIP
-check_fakeip github.com || FAIL=1
-check_fakeip unifi.ui.com || FAIL=1
-check_fakeip claude.ai || FAIL=1
-check_fakeip gemini.google.com || FAIL=1
+for HOST in $FAKEIP_DOMAINS
+do
+    check_fakeip "$HOST" || FAIL=1
+done
 
 exit $FAIL
