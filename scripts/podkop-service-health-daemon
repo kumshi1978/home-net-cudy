@@ -3,11 +3,11 @@
 # Фоновый монитор состояния Podkop / sing-box / AmneziaWG
 # Версия: 1.4.1-dev
 #
-# Генерирует только состояние системы.
-# События обрабатывает podkop-event-monitor.
+# Генерирует состояние системы и передаёт обновление в event pipeline.
 
 CONF="/etc/podkop-service-check.conf"
 CHECK="/usr/bin/podkop-service-check"
+EVENT_RUNNER="/usr/bin/podkop-event-runner"
 
 TAG="podkop-service-health"
 LOG_DIR="/tmp/podkop-service-health"
@@ -94,6 +94,11 @@ write_state() {
     mv "$TMP" "$STATE_FILE"
 }
 
+run_event_pipeline() {
+    [ -x "$EVENT_RUNNER" ] || return 0
+    "$EVENT_RUNNER" || log "EVENT RUNNER FAILED"
+}
+
 write_daily_log() {
     DATE="$(date +%F)"
     FILE="$LOG_DIR/service-$DATE.log"
@@ -106,6 +111,7 @@ do
     RESULT="$($CHECK 2>&1)"
     write_daily_log
     write_state
+    run_event_pipeline
 
     if [ "$STATUS" = "OK" ]; then log "HOME NET OK active=$(uci -q get podkop.main.interface)"; else log "HOME NET WARNING"; fi
     sleep "$INTERVAL"
