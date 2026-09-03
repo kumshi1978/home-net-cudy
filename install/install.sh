@@ -12,16 +12,22 @@ fail() {
     exit 1
 }
 
-[ -d /etc/openwrt_release ] || fail "Не обнаружен OpenWrt"
+[ -f /etc/openwrt_release ] || fail "Не обнаружен OpenWrt"
 
 check_file() {
     [ -f "$1" ] || fail "отсутствует файл $1"
 }
 
-check_file "$BASE_DIR/../scripts/podkop-service-health-daemon"
-check_file "$BASE_DIR/../scripts/podkop-service-check"
-check_file "$BASE_DIR/../scripts/podkop-fakeip-check"
-check_file "$BASE_DIR/../init.d/podkop-service-health"
+for FILE in \
+    "$BASE_DIR/../scripts/podkop-service-health-daemon" \
+    "$BASE_DIR/../scripts/podkop-service-check" \
+    "$BASE_DIR/../scripts/podkop-fakeip-check" \
+    "$BASE_DIR/../scripts/podkop-event-monitor" \
+    "$BASE_DIR/../scripts/podkop-event-runner" \
+    "$BASE_DIR/../init.d/podkop-service-health"
+do
+    check_file "$FILE"
+done
 
 mkdir -p /root/backup-podkop-install
 
@@ -29,8 +35,10 @@ for FILE in \
     /usr/bin/podkop-service-health-daemon \
     /usr/bin/podkop-service-check \
     /usr/bin/podkop-fakeip-check \
+    /usr/bin/podkop-event-monitor \
+    /usr/bin/podkop-event-runner \
     /etc/init.d/podkop-service-health
- do
+do
     [ -f "$FILE" ] && cp -p "$FILE" /root/backup-podkop-install/
 done
 
@@ -40,9 +48,15 @@ cp "$BASE_DIR/../init.d/podkop-service-health" /etc/init.d/
 chmod +x /usr/bin/podkop-*
 chmod +x /etc/init.d/podkop-service-health
 
-sh -n /usr/bin/podkop-service-health-daemon
-sh -n /usr/bin/podkop-service-check
-sh -n /usr/bin/podkop-fakeip-check
+for FILE in \
+    /usr/bin/podkop-service-health-daemon \
+    /usr/bin/podkop-service-check \
+    /usr/bin/podkop-fakeip-check \
+    /usr/bin/podkop-event-monitor \
+    /usr/bin/podkop-event-runner
+do
+    sh -n "$FILE"
+done
 
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
