@@ -19,9 +19,7 @@ INTERVAL="${CHECK_INTERVAL:-300}"
 
 mkdir -p "$LOG_DIR"
 
-log() {
-    logger -t "$TAG" "$*"
-}
+log() { logger -t "$TAG" "$*"; }
 
 rotate_logs() {
     NOW=$(date +%s)
@@ -33,28 +31,18 @@ rotate_logs() {
     done
 }
 
-get_country() {
-    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null
-}
+get_country() { curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null; }
+get_ip() { curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null; }
+get_wan_ip() { curl -4 --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null; }
 
-get_ip() {
-    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
-}
-
-get_wan_ip() {
-    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
-}
-
-check_fakeip() {
-    /usr/bin/podkop-fakeip-check >/dev/null 2>&1
-}
+check_fakeip() { /usr/bin/podkop-fakeip-check >/dev/null 2>&1; }
 
 check_singbox() {
     ubus call service list '{"name":"sing-box"}' | grep -q '"running": true'
 }
 
 check_podkop() {
-    pgrep -f '/usr/bin/sing-box' >/dev/null 2>&1
+    ubus call service list '{"name":"podkop"}' | grep -q '"running": true'
 }
 
 write_state() {
@@ -93,27 +81,16 @@ write_state() {
 write_daily_log() {
     DATE="$(date +%F)"
     FILE="$LOG_DIR/service-$DATE.log"
-    {
-        echo
-        echo "$(date '+%F %T')"
-        echo "ACTIVE VPN: $(uci -q get podkop.main.interface)"
-        echo "$RESULT"
-    } >> "$FILE"
+    { echo; echo "$(date '+%F %T')"; echo "$RESULT"; } >> "$FILE"
 }
 
 while true
 do
     rotate_logs
     RESULT="$($CHECK 2>&1)"
-    RC=$?
     write_daily_log
     write_state
 
-    if [ "$STATUS" = "OK" ]; then
-        log "HOME NET OK active=$(uci -q get podkop.main.interface)"
-    else
-        log "HOME NET WARNING"
-    fi
-
+    if [ "$STATUS" = "OK" ]; then log "HOME NET OK active=$(uci -q get podkop.main.interface)"; else log "HOME NET WARNING"; fi
     sleep "$INTERVAL"
 done
