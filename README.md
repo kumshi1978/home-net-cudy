@@ -1,31 +1,33 @@
 # HOME NET — Cudy / OpenWrt / Podkop / AmneziaWG
 
-Repository for the HOME NET project.
+Проект управления домашней сетью на базе роутеров Cudy с OpenWrt.
 
-## Purpose
+## Назначение
 
-Central storage for scripts, configurations and documentation used on Cudy routers running OpenWrt.
+Цель проекта — единая, проверяемая и версионируемая конфигурация для всех Cudy:
 
-## Current components
+- Podkop
+- sing-box
+- AmneziaWG
+- VPN маршрутизация
+- контроль доступности сервисов
+- диагностика и автоматизация
 
-- Podkop health monitoring
-- AmneziaWG tunnel checks
-- Podkop routing validation
-- sing-box checks
-- FakeIP validation
-- Service state reporting
+## Принципы проекта
 
-## Router environment
+- GitHub является источником истины.
+- Изменения сначала проверяются на тестовом роутере.
+- Локальные отличия устройств фиксируются отдельно.
+- Документация и комментарии ведутся на русском языке.
 
-- OpenWrt 24.x / 25.x
-- Cudy routers
-- AmneziaWG main/backup tunnels
-- Podkop + sing-box
+## Текущая версия
 
-## Versioning
+v1.3.9 — базовая система мониторинга HOME NET.
 
-Stable milestones are stored by version tags and backup snapshots.
+Проверенная среда:
 
-Current development line:
-
-- v139 — health monitor foundation
+- Cudy
+- OpenWrt 25.x
+- Podkop 0.7.22
+- sing-box
+- AmneziaWG awg_main / awg_backup
