@@ -1,11 +1,10 @@
 #!/bin/sh
 # HOME NET Cudy
 # Монитор изменений состояния Podkop / sing-box / AmneziaWG
-# Версия: 1.4.0-dev
+# Версия: 1.4.1-dev
 #
-# Второй этап Event Monitor.
 # Только фиксация событий.
-# Автоматическое восстановление будет добавлено позже.
+# Автоматическое восстановление выполняет отдельный failover слой.
 
 LOG_DIR="/tmp/podkop-service-health"
 STATE_FILE="$LOG_DIR/state"
@@ -22,7 +21,15 @@ get_value() {
     grep "^$1=" "$2" 2>/dev/null | cut -d= -f2-
 }
 
-if [ ! -f "$STATE_FILE" ]; then
+valid_state() {
+    [ -f "$1" ] || return 1
+    grep -q '^STATUS=' "$1" || return 1
+    grep -q '^PODKOP=' "$1" || return 1
+    grep -q '^SING_BOX=' "$1" || return 1
+    grep -q '^FAKEIP=' "$1" || return 1
+}
+
+if ! valid_state "$STATE_FILE"; then
     exit 0
 fi
 
@@ -36,24 +43,17 @@ OLD_STATUS="$(get_value STATUS "$PREVIOUS_STATE")"
 NEW_STATUS="$(get_value STATUS "$STATE_FILE")"
 
 if [ "$OLD_STATUS" != "$NEW_STATUS" ]; then
-    if [ "$NEW_STATUS" = "FAIL" ]; then
-        log_event "SYSTEM FAILURE"
-    else
-        log_event "SYSTEM RECOVERY"
-    fi
+    log_event "STATUS_CHANGED $OLD_STATUS -> $NEW_STATUS"
 fi
 
-for CHECK in FAKEIP SING_BOX PODKOP; do
+for CHECK in FAKEIP SING_BOX PODKOP ACTIVE_VPN; do
     OLD="$(get_value "$CHECK" "$PREVIOUS_STATE")"
     NEW="$(get_value "$CHECK" "$STATE_FILE")"
 
     if [ "$OLD" != "$NEW" ]; then
-        if [ "$NEW" = "FAIL" ]; then
-            log_event "$CHECK DOWN"
-        else
-            log_event "$CHECK RECOVERED"
-        fi
+        log_event "${CHECK}_CHANGED $OLD -> $NEW"
     fi
 done
 
-cp "$STATE_FILE" "$PREVIOUS_STATE"
+TMP="$PREVIOUS_STATE.tmp"
+cp "$STATE_FILE" "$TMP" && mv "$TMP" "$PREVIOUS_STATE"
