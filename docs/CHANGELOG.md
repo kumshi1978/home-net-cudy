@@ -8,9 +8,16 @@
 - podkop-event-monitor для фиксации переходов состояния;
 - podkop-event-runner как слой обработки событий;
 - atomic обновление state-файлов;
-- улучшенная проверка FakeIP DNS;
+- безопасный разбор state-файлов в event-monitor;
+- улучшенная проверка FakeIP DNS с настраиваемым списком доменов;
 - исправленные exit codes для service-check;
+- отдельные проверки Podkop и sing-box;
+- корректная обработка отсутствующего awg_backup;
+- восстановлены AWG_MAIN_COUNTRY и AWG_BACKUP_COUNTRY в state;
+- восстановлено разделение ACTIVE_COUNTRY и WAN_COUNTRY;
+- сохранена очистка ежедневных логов по KEEP_DAYS;
 - расширенный install pipeline;
+- installer сохраняет существующий /etc/podkop-service-check.conf при обновлении;
 - установка и проверка всех компонентов мониторинга.
 
 Компоненты:
@@ -26,6 +33,8 @@
 - OpenWrt 24.10.x;
 - OpenWrt 25.12.x;
 - BusyBox ash.
+
+Перед финальным релизом требуется аппаратная проверка на Cudy/OpenWrt.
 
 ## v1.3.9 — базовый мониторинг
 
