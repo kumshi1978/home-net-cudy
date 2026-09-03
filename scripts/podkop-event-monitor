@@ -18,7 +18,9 @@ log_event() {
 }
 
 get_value() {
-    grep "^$1=" "$2" 2>/dev/null | cut -d= -f2-
+    KEY="$1"
+    FILE="$2"
+    awk -F= -v key="$KEY" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$FILE" 2>/dev/null
 }
 
 valid_state() {
