@@ -34,8 +34,9 @@ if ! valid_state "$STATE_FILE"; then
 fi
 
 if [ ! -f "$PREVIOUS_STATE" ]; then
-    cp "$STATE_FILE" "$PREVIOUS_STATE"
-    log_event "MONITOR START"
+    TMP="$PREVIOUS_STATE.tmp"
+    cp "$STATE_FILE" "$TMP" && mv "$TMP" "$PREVIOUS_STATE"
+    log_event "INITIAL_STATE ACCEPTED"
     exit 0
 fi
 
