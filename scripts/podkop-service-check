@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Проверка состояния Podkop, AmneziaWG и доступности сервисов
-# Версия: 1.4.0-dev
+# Версия: 1.4.1-dev
 
 TAG="podkop-service-check"
 
@@ -9,17 +9,14 @@ log() {
     logger -t "$TAG" "$*"
 }
 
-check_country()
-{
+check_country() {
     NAME="$1"
     IFACE="$2"
 
     echo "--- $NAME ($IFACE) ---"
 
-    IP=$(curl -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null)
     COUNTRY=$(curl -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null)
 
-    echo "IP:      $IP"
     echo "Country: $COUNTRY"
 
     if [ "$COUNTRY" = "RU" ] || [ -z "$COUNTRY" ]; then
@@ -28,10 +25,10 @@ check_country()
     fi
 
     echo "STATUS: OK"
+    return 0
 }
 
-check_url()
-{
+check_url() {
     NAME="$1"
     URL="$2"
 
@@ -53,25 +50,17 @@ check_url()
 
 FAIL=0
 
-echo "===== VPN TUNNELS ====="
 check_country "AWG MAIN" awg_main || FAIL=1
 check_country "AWG BACKUP" awg_backup || FAIL=1
 
-echo "===== PODKOP ROUTING ====="
-for d in github.com unifi.ui.com ui.com claude.ai gemini.google.com huggingface.co perplexity.ai
+for URL in \
+    "https://github.com" \
+    "https://api.github.com" \
+    "https://raw.githubusercontent.com" \
+    "https://unifi.ui.com" \
+    "https://claude.ai"
 do
-    echo -n "$d -> "
-    nslookup "$d" 127.0.0.1 2>/dev/null | grep Address | tail -1
+    check_url "$URL" "$URL" || FAIL=1
 done
 
-check_url "GitHub" "https://github.com" || FAIL=1
-check_url "GitHub API" "https://api.github.com" || FAIL=1
-check_url "GitHub RAW" "https://raw.githubusercontent.com" || FAIL=1
-check_url "UniFi" "https://unifi.ui.com" || FAIL=1
-check_url "Ubiquiti" "https://ui.com" || FAIL=1
-check_url "Anthropic" "https://claude.ai" || FAIL=1
-check_url "Google AI" "https://gemini.google.com" || FAIL=1
-check_url "HuggingFace" "https://huggingface.co" || FAIL=1
-check_url "Perplexity" "https://perplexity.ai" || FAIL=1
-
-[ "$FAIL" = 0 ]
+exit $FAIL
