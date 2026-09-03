@@ -7,8 +7,8 @@ CHECK_AI=1
 
 OK_CODES="200 301 302 401 403"
 
-FAIL_LIMIT=3
-CHECK_INTERVAL=300
-
 # FakeIP domains checked through local DNS
 FAKEIP_DOMAINS="github.com unifi.ui.com claude.ai gemini.google.com"
+
+FAIL_LIMIT=3
+CHECK_INTERVAL=300
