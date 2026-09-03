@@ -3,9 +3,9 @@
 # Монитор изменений состояния Podkop / sing-box / AmneziaWG
 # Версия: 1.4.0-dev
 #
-# Первый этап Event Monitor.
-# Не выполняет восстановление сервисов.
-# Только фиксирует переходы состояний.
+# Второй этап Event Monitor.
+# Только фиксация событий.
+# Автоматическое восстановление будет добавлено позже.
 
 LOG_DIR="/tmp/podkop-service-health"
 STATE_FILE="$LOG_DIR/state"
@@ -14,20 +14,46 @@ EVENT_LOG="$LOG_DIR/events.log"
 
 mkdir -p "$LOG_DIR"
 
+log_event() {
+    echo "$(date '+%F %T') EVENT: $*" >> "$EVENT_LOG"
+}
+
+get_value() {
+    grep "^$1=" "$2" 2>/dev/null | cut -d= -f2-
+}
+
 if [ ! -f "$STATE_FILE" ]; then
     exit 0
 fi
 
-CURRENT=$(grep '^STATUS=' "$STATE_FILE")
-
-if [ -f "$PREVIOUS_STATE" ]; then
-    PREVIOUS=$(cat "$PREVIOUS_STATE")
-else
-    PREVIOUS=""
+if [ ! -f "$PREVIOUS_STATE" ]; then
+    cp "$STATE_FILE" "$PREVIOUS_STATE"
+    log_event "MONITOR START"
+    exit 0
 fi
 
-if [ "$CURRENT" != "$PREVIOUS" ]; then
-    echo "$(date '+%F %T') STATE CHANGE: $PREVIOUS -> $CURRENT" >> "$EVENT_LOG"
+OLD_STATUS="$(get_value STATUS "$PREVIOUS_STATE")"
+NEW_STATUS="$(get_value STATUS "$STATE_FILE")"
+
+if [ "$OLD_STATUS" != "$NEW_STATUS" ]; then
+    if [ "$NEW_STATUS" = "FAIL" ]; then
+        log_event "SYSTEM FAILURE"
+    else
+        log_event "SYSTEM RECOVERY"
+    fi
 fi
 
-printf "%s" "$CURRENT" > "$PREVIOUS_STATE"
+for CHECK in FAKEIP SING_BOX PODKOP; do
+    OLD="$(get_value "$CHECK" "$PREVIOUS_STATE")"
+    NEW="$(get_value "$CHECK" "$STATE_FILE")"
+
+    if [ "$OLD" != "$NEW" ]; then
+        if [ "$NEW" = "FAIL" ]; then
+            log_event "$CHECK DOWN"
+        else
+            log_event "$CHECK RECOVERED"
+        fi
+    fi
+done
+
+cp "$STATE_FILE" "$PREVIOUS_STATE"
