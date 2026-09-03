@@ -1,0 +1,198 @@
+#!/bin/sh
+# HOME NET Cudy
+# Фоновый монитор состояния Podkop / sing-box / AmneziaWG
+# Версия: 1.3.9
+
+CONF="/etc/podkop-service-check.conf"
+CHECK="/usr/bin/podkop-service-check"
+
+TAG="podkop-service-health"
+
+LOG_DIR="/tmp/podkop-service-health"
+STATE_FILE="$LOG_DIR/state"
+EVENT_LOG="$LOG_DIR/events.log"
+
+KEEP_DAYS=14
+
+[ -r "$CONF" ] && . "$CONF"
+
+INTERVAL="${CHECK_INTERVAL:-300}"
+
+mkdir -p "$LOG_DIR"
+
+log() {
+    logger -t "$TAG" "$*"
+}
+
+# Журнал событий будет использоваться в следующих версиях
+# для фиксации переходов OK/FAIL/RECOVERY.
+event_log() {
+    echo "$(date '+%F %T') $*" >> "$EVENT_LOG"
+}
+
+rotate_logs() {
+    NOW=$(date +%s)
+
+    for FILE in "$LOG_DIR"/service-*.log; do
+        [ -f "$FILE" ] || continue
+
+        MTIME=$(stat -c %Y "$FILE" 2>/dev/null || echo "$NOW")
+        AGE=$(( (NOW - MTIME) / 86400 ))
+
+        [ "$AGE" -gt "$KEEP_DAYS" ] && rm -f "$FILE"
+    done
+}
+
+get_country() {
+    IFACE="$1"
+
+    curl -4 \
+        --interface "$IFACE" \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ipinfo.io/country 2>/dev/null
+}
+
+get_ip() {
+    IFACE="$1"
+
+    curl -4 \
+        --interface "$IFACE" \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ifconfig.me/ip 2>/dev/null
+}
+
+get_wan_ip() {
+    curl -4 \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ifconfig.me/ip 2>/dev/null
+}
+
+get_direct_country() {
+    curl -4 \
+        --connect-timeout 5 \
+        --max-time 10 \
+        -fsS https://ipinfo.io/country 2>/dev/null
+}
+
+check_fakeip() {
+    /usr/bin/podkop-fakeip-check >/dev/null 2>&1
+}
+
+check_singbox() {
+    ubus call service list '{"name":"sing-box"}' \
+        | grep -q '"running": true'
+}
+
+check_podkop() {
+    pgrep -f '/usr/bin/sing-box' >/dev/null 2>&1
+}
+
+# Основная запись состояния монитора.
+write_state() {
+
+    ACTIVE="$(uci -q get podkop.main.interface || echo unknown)"
+
+    ACTIVE_IP="$(get_ip "$ACTIVE")"
+    ACTIVE_COUNTRY="$(get_country "$ACTIVE")"
+
+    WAN_IP="$(get_wan_ip)"
+    WAN_COUNTRY="$(get_direct_country)"
+
+    MAIN_COUNTRY="$(get_country awg_main)"
+    BACKUP_COUNTRY="$(get_country awg_backup)"
+
+    STATUS="OK"
+
+    if [ "$ACTIVE_IP" = "$WAN_IP" ]; then
+        STATUS="FAIL"
+        log "VPN BYPASS DETECTED"
+    fi
+
+    if [ "$ACTIVE_COUNTRY" = "RU" ]; then
+        STATUS="FAIL"
+        log "VPN COUNTRY RU DETECTED"
+    fi
+
+    if check_singbox; then
+        SING_BOX="RUNNING"
+    else
+        SING_BOX="FAIL"
+        STATUS="FAIL"
+    fi
+
+    if check_podkop; then
+        PODKOP="RUNNING"
+    else
+        PODKOP="FAIL"
+        STATUS="FAIL"
+    fi
+
+    if check_fakeip; then
+        FAKEIP="OK"
+    else
+        FAKEIP="FAIL"
+        STATUS="FAIL"
+        log "FAKEIP CHECK FAILED"
+    fi
+
+    {
+        echo "STATUS=$STATUS"
+        echo
+        echo "ACTIVE_VPN=$ACTIVE"
+        echo "ACTIVE_IP=$ACTIVE_IP"
+        echo "ACTIVE_COUNTRY=$ACTIVE_COUNTRY"
+        echo "WAN_IP=$WAN_IP"
+        echo "WAN_COUNTRY=$WAN_COUNTRY"
+        echo "AWG_MAIN_COUNTRY=$MAIN_COUNTRY"
+        echo "AWG_BACKUP_COUNTRY=$BACKUP_COUNTRY"
+        echo "PODKOP=$PODKOP"
+        echo "SING_BOX=$SING_BOX"
+        echo "FAKEIP=$FAKEIP"
+        echo "LAST_CHECK=$(date '+%F %T')"
+    } > "$STATE_FILE"
+}
+
+write_daily_log() {
+    DATE="$(date +%F)"
+    FILE="$LOG_DIR/service-$DATE.log"
+
+    {
+        echo
+        echo "================================"
+        echo "$(date '+%F %T')"
+        echo "================================"
+        echo "ACTIVE VPN: $(uci -q get podkop.main.interface)"
+        echo "$RESULT"
+        echo
+    } >> "$FILE"
+}
+
+FAIL_COUNT=0
+
+while true
+do
+    rotate_logs
+
+    RESULT="$($CHECK 2>&1)"
+    RC=$?
+
+    if [ "$RC" = "0" ]; then
+        FAIL_COUNT=0
+    else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
+
+    write_daily_log
+    write_state
+
+    if [ "$STATUS" = "OK" ]; then
+        log "HOME NET OK active=$(uci -q get podkop.main.interface)"
+    else
+        log "HOME NET WARNING"
+    fi
+
+    sleep "$INTERVAL"
+done
