@@ -7,6 +7,7 @@
 - разделение health state и event pipeline;
 - podkop-event-monitor для фиксации переходов состояния;
 - podkop-event-runner как слой обработки событий;
+- health-daemon вызывает event pipeline после успешного atomic обновления state;
 - atomic обновление state-файлов;
 - безопасный разбор state-файлов в event-monitor;
 - улучшенная проверка FakeIP DNS с настраиваемым списком доменов;
@@ -18,6 +19,7 @@
 - сохранена очистка ежедневных логов по KEEP_DAYS;
 - расширенный install pipeline;
 - installer сохраняет существующий /etc/podkop-service-check.conf при обновлении;
+- installer копирует и chmod только файлы мониторинга, не содержимое scripts/ целиком;
 - установка и проверка всех компонентов мониторинга.
 
 Компоненты:
