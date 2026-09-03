@@ -31,9 +31,21 @@ rotate_logs() {
     done
 }
 
-get_country() { curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null; }
-get_ip() { curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null; }
-get_wan_ip() { curl -4 --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null; }
+get_country() {
+    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null
+}
+
+get_ip() {
+    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
+}
+
+get_wan_ip() {
+    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
+}
+
+get_direct_country() {
+    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null
+}
 
 check_fakeip() { /usr/bin/podkop-fakeip-check >/dev/null 2>&1; }
 
@@ -51,11 +63,13 @@ write_state() {
     ACTIVE_IP="$(get_ip "$ACTIVE")"
     ACTIVE_COUNTRY="$(get_country "$ACTIVE")"
     WAN_IP="$(get_wan_ip)"
-    WAN_COUNTRY="$(get_country "$ACTIVE")"
+    WAN_COUNTRY="$(get_direct_country)"
+    MAIN_COUNTRY="$(get_country awg_main)"
+    BACKUP_COUNTRY="$(get_country awg_backup)"
 
     STATUS="OK"
 
-    [ "$ACTIVE_IP" = "$WAN_IP" ] && STATUS="FAIL" && log "VPN BYPASS DETECTED"
+    [ -n "$ACTIVE_IP" ] && [ -n "$WAN_IP" ] && [ "$ACTIVE_IP" = "$WAN_IP" ] && STATUS="FAIL" && log "VPN BYPASS DETECTED"
     [ "$ACTIVE_COUNTRY" = "RU" ] && STATUS="FAIL" && log "VPN COUNTRY RU DETECTED"
 
     if check_singbox; then SING_BOX="RUNNING"; else SING_BOX="FAIL"; STATUS="FAIL"; fi
@@ -69,6 +83,8 @@ write_state() {
         echo "ACTIVE_COUNTRY=$ACTIVE_COUNTRY"
         echo "WAN_IP=$WAN_IP"
         echo "WAN_COUNTRY=$WAN_COUNTRY"
+        echo "AWG_MAIN_COUNTRY=$MAIN_COUNTRY"
+        echo "AWG_BACKUP_COUNTRY=$BACKUP_COUNTRY"
         echo "PODKOP=$PODKOP"
         echo "SING_BOX=$SING_BOX"
         echo "FAKEIP=$FAKEIP"
