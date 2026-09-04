@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Установщик мониторинга Podkop
-# Версия: 1.4.1-dev
+# Версия: 1.4.1
 
 set -e
 
@@ -86,4 +86,4 @@ chmod 0755 \
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
 
-echo "HOME NET Podkop Monitor v1.4.1-dev installed"
+echo "HOME NET Podkop Monitor v1.4.1 installed"
