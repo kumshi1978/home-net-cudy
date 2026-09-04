@@ -1,0 +1,62 @@
+#!/bin/sh
+# HOME NET Cudy
+# Монитор изменений состояния Podkop / sing-box / AmneziaWG
+# Версия: 1.4.1-dev
+#
+# Только фиксация событий.
+# Автоматическое восстановление выполняет отдельный failover слой.
+
+LOG_DIR="/tmp/podkop-service-health"
+STATE_FILE="$LOG_DIR/state"
+PREVIOUS_STATE="$LOG_DIR/previous_state"
+EVENT_LOG="$LOG_DIR/events.log"
+
+mkdir -p "$LOG_DIR"
+
+log_event() {
+    echo "$(date '+%F %T') EVENT: $*" >> "$EVENT_LOG"
+}
+
+get_value() {
+    KEY="$1"
+    FILE="$2"
+    awk -F= -v key="$KEY" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$FILE" 2>/dev/null
+}
+
+valid_state() {
+    [ -f "$1" ] || return 1
+    grep -q '^STATUS=' "$1" || return 1
+    grep -q '^PODKOP=' "$1" || return 1
+    grep -q '^SING_BOX=' "$1" || return 1
+    grep -q '^FAKEIP=' "$1" || return 1
+}
+
+if ! valid_state "$STATE_FILE"; then
+    exit 0
+fi
+
+if [ ! -f "$PREVIOUS_STATE" ]; then
+    TMP="$PREVIOUS_STATE.tmp"
+    cp "$STATE_FILE" "$TMP" && mv "$TMP" "$PREVIOUS_STATE"
+    log_event "INITIAL_STATE ACCEPTED"
+    exit 0
+fi
+
+OLD_STATUS="$(get_value STATUS "$PREVIOUS_STATE")"
+NEW_STATUS="$(get_value STATUS "$STATE_FILE")"
+
+if [ "$OLD_STATUS" != "$NEW_STATUS" ]; then
+    log_event "STATUS_CHANGED $OLD_STATUS -> $NEW_STATUS"
+fi
+
+for CHECK in FAKEIP SING_BOX PODKOP ACTIVE_VPN; do
+    OLD="$(get_value "$CHECK" "$PREVIOUS_STATE")"
+    NEW="$(get_value "$CHECK" "$STATE_FILE")"
+
+    if [ "$OLD" != "$NEW" ]; then
+        log_event "${CHECK}_CHANGED $OLD -> $NEW"
+    fi
+done
+
+TMP="$PREVIOUS_STATE.tmp"
+cp "$STATE_FILE" "$TMP" && mv "$TMP" "$PREVIOUS_STATE"

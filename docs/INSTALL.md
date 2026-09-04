@@ -2,15 +2,30 @@
 
 ## Назначение
 
-Служба контролирует состояние Podkop, sing-box и AmneziaWG на Cudy/OpenWrt.
+Служба контролирует состояние Podkop, sing-box, FakeIP и AmneziaWG на Cudy/OpenWrt.
 
 ## Установка
 
-Файлы:
+Основной способ установки:
+
+```sh
+sh install/install.sh
+```
+
+Установщик:
+
+- проверяет OpenWrt;
+- делает backup текущих файлов;
+- проверяет синтаксис shell-скриптов;
+- устанавливает компоненты мониторинга.
+
+## Устанавливаемые файлы
 
 - scripts/podkop-service-check
 - scripts/podkop-service-health-daemon
 - scripts/podkop-fakeip-check
+- scripts/podkop-event-monitor
+- scripts/podkop-event-runner
 - init.d/podkop-service-health
 
 Копируются в:
@@ -20,20 +35,29 @@
 /etc/init.d/
 ```
 
-## Запуск
-
-```sh
-chmod +x /usr/bin/podkop-*
-/etc/init.d/podkop-service-health enable
-/etc/init.d/podkop-service-health start
-```
-
-## Проверка
+## Проверка после установки
 
 ```sh
 cat /tmp/podkop-service-health/state
 ```
 
+Ожидаемые параметры:
+
+```
+STATUS=OK
+PODKOP=RUNNING
+SING_BOX=RUNNING
+FAKEIP=OK
+```
+
+## Backup
+
+Перед изменением файлов создаётся резервная копия:
+
+```
+/root/backup-podkop-install/
+```
+
 ## Совместимость
 
-Проверяется на OpenWrt 24.x и 25.x.
+Проверка выполняется для OpenWrt 24.x и 25.x.
