@@ -54,7 +54,9 @@ check_singbox() {
 }
 
 check_podkop() {
-    ubus call service list '{"name":"podkop"}' | grep -q '"running": true'
+    nft list table inet PodkopTable >/dev/null 2>&1 || return 1
+    ip rule show 2>/dev/null | grep -Eq 'lookup[[:space:]]+podkop([[:space:]]|$)' || return 1
+    return 0
 }
 
 write_state() {
