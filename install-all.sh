@@ -30,10 +30,11 @@ fetch() {
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
-case "$DEFAULT_AUTO_UPDATE_MODE" in check|apply) ;; *) fail "invalid DEFAULT_AUTO_UPDATE_MODE" ;; esac
+AUTO_UPDATE_MODE="${HOME_NET_AUTO_UPDATE_MODE:-$DEFAULT_AUTO_UPDATE_MODE}"
+case "$AUTO_UPDATE_MODE" in check|apply) ;; *) fail "HOME_NET_AUTO_UPDATE_MODE must be check or apply" ;; esac
 
 printf 'HOME NET bundle %s\n' "$HOME_NET_BUNDLE_VERSION"
-printf 'Failover %s, Monitoring %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION"
+printf 'Failover %s, Monitoring %s, auto-update %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION" "$AUTO_UPDATE_MODE"
 
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
@@ -51,7 +52,7 @@ UPDATE_SOURCE_REF="v$FAILOVER_VERSION" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
 
 printf '\n===== SET AUTO UPDATE MODE =====\n'
 if [ -f /etc/podkop-awg-update.conf ]; then
-    sed -i "s/^AUTO_UPDATE_MODE='[^']*'/AUTO_UPDATE_MODE='$DEFAULT_AUTO_UPDATE_MODE'/" /etc/podkop-awg-update.conf
+    sed -i "s/^AUTO_UPDATE_MODE='[^']*'/AUTO_UPDATE_MODE='$AUTO_UPDATE_MODE'/" /etc/podkop-awg-update.conf
     /etc/init.d/podkop-awg-update restart >/dev/null 2>&1 || true
 fi
 
