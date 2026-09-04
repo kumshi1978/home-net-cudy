@@ -63,6 +63,21 @@ Bootstrap не должен устанавливать произвольный 
 
 Каждый HOME NET bundle Release фиксирует точный набор протестированных версий.
 
+## Что такое canary-router
+
+**Canary-router** — это один заранее выбранный тестовый боевой Cudy, который получает новую опубликованную stable-версию раньше остальных роутеров HOME NET.
+
+Он нужен для проверки релиза на реальном оборудовании до массового rollout. Если новая версия окажется проблемной, риск ограничивается одним заранее выбранным устройством, а остальные роутеры продолжают работать на уже проверенной версии.
+
+Для HOME NET используется следующая схема:
+
+- canary-router — `AUTO_UPDATE_MODE='apply'`;
+- остальные Cudy — `AUTO_UPDATE_MODE='check'`;
+- после успешной проверки новой версии на canary обновление разрешается остальным устройствам поэтапно;
+- OpenWrt 24.x и OpenWrt 25.x считаются разными аппаратно-программными группами и проверяются отдельно.
+
+Canary-router не является отдельным типом оборудования: это роль, которую мы назначаем одному из обычных Cudy для безопасного поэтапного обновления.
+
 ## Политика обновлений
 
 ### По умолчанию
@@ -148,7 +163,9 @@ wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/instal
 Для canary:
 
 ```sh
-HOME_NET_UPDATE_MODE=apply wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh | sh
+wget -qO /tmp/home-net-install-all.sh \
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh
+HOME_NET_AUTO_UPDATE_MODE=apply sh /tmp/home-net-install-all.sh
 ```
 
 Перед production rollout bootstrap должен быть привязан к опубликованному HOME NET release/commit, а не динамически устанавливать текущее содержимое component `main`.
