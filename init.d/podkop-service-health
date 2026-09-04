@@ -1,7 +1,7 @@
 #!/bin/sh /etc/rc.common
 # HOME NET Cudy
 # Автозапуск службы мониторинга Podkop
-# Версия: 1.4.1-dev
+# Версия: 1.4.1
 
 START=110
 STOP=10
