@@ -7,8 +7,10 @@ CHECK_AI=1
 
 OK_CODES="200 301 302 401 403"
 
-# FakeIP domains checked through local DNS
-FAKEIP_DOMAINS="github.com unifi.ui.com claude.ai gemini.google.com"
+# FakeIP domains checked through local DNS.
+# Keep only domains that are expected to use VPN/FakeIP by HOME NET policy.
+# UniFi direct-exclusion domains must not be listed here.
+FAKEIP_DOMAINS="github.com claude.ai gemini.google.com"
 
 FAIL_LIMIT=3
 CHECK_INTERVAL=300

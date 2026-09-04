@@ -1,0 +1,6 @@
+# HOME NET — common Podkop direct exclusions
+# One domain per line. These domains should bypass VPN/FakeIP when supported by Podkop exclusion routing.
+# Keep this list common across all Cudy routers unless a local exception is explicitly documented.
+
+ui.com
+ping.ui.com
