@@ -39,10 +39,12 @@
 
 ## Быстрая установка
 
-После создания тега `v1.4.1` на OpenWrt можно запустить:
+На OpenWrt:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.4.1/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
+
+Текущий bootstrap для v1.4.1 жёстко привязан к проверенному релизному commit `d29183b745e1fee7f1ab999f37e7aacf564c18fd`, поэтому последующие изменения `main` не подменят устанавливаемую v1.4.1.
 
 Подробности: `docs/INSTALL.md`.
