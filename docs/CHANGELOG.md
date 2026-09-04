@@ -1,42 +1,51 @@
 # История изменений HOME NET
 
-## v1.4.1-dev — HOME NET Monitoring
+## v1.4.1 — HOME NET Monitoring
+
+Дата релиза: 2026-09-04
 
 Добавлено и исправлено:
 
 - разделение health state и event pipeline;
-- podkop-event-monitor для фиксации переходов состояния;
-- podkop-event-runner как слой обработки событий;
+- `podkop-event-monitor` для фиксации переходов состояния;
+- `podkop-event-runner` как слой обработки событий;
 - health-daemon вызывает event pipeline после успешного atomic обновления state;
 - atomic обновление state-файлов;
 - безопасный разбор state-файлов в event-monitor;
 - улучшенная проверка FakeIP DNS с настраиваемым списком доменов;
 - исправленные exit codes для service-check;
 - отдельные проверки Podkop и sing-box;
-- корректная обработка отсутствующего awg_backup;
-- восстановлены AWG_MAIN_COUNTRY и AWG_BACKUP_COUNTRY в state;
-- восстановлено разделение ACTIVE_COUNTRY и WAN_COUNTRY;
-- сохранена очистка ежедневных логов по KEEP_DAYS;
-- расширенный install pipeline;
-- installer сохраняет существующий /etc/podkop-service-check.conf при обновлении;
-- installer копирует и chmod только файлы мониторинга, не содержимое scripts/ целиком;
-- установка и проверка всех компонентов мониторинга.
+- Podkop health определяется по runtime routing (`inet PodkopTable` + `lookup podkop`), а не по `procd running=true`;
+- корректная обработка отсутствующего `awg_backup`;
+- восстановлены `AWG_MAIN_COUNTRY` и `AWG_BACKUP_COUNTRY` в state;
+- восстановлено разделение `ACTIVE_COUNTRY` и `WAN_COUNTRY`;
+- сохранена очистка ежедневных логов по `KEEP_DAYS`;
+- installer сохраняет существующий `/etc/podkop-service-check.conf`;
+- installer копирует и chmod только файлы мониторинга;
+- добавлен публичный bootstrap-установщик из GitHub.
 
 Компоненты:
 
-- podkop-service-check;
-- podkop-service-health-daemon;
-- podkop-fakeip-check;
-- podkop-event-monitor;
-- podkop-event-runner.
+- `podkop-service-check`;
+- `podkop-service-health-daemon`;
+- `podkop-fakeip-check`;
+- `podkop-event-monitor`;
+- `podkop-event-runner`.
 
-Совместимость:
+Аппаратная проверка v1.4.1:
 
-- OpenWrt 24.10.x;
-- OpenWrt 25.12.x;
-- BusyBox ash.
+- Cudy;
+- OpenWrt 24.10.4;
+- `STATUS=OK`;
+- `PODKOP=RUNNING`;
+- `SING_BOX=RUNNING`;
+- `FAKEIP=OK`;
+- event pipeline проверен на `OK -> FAIL -> OK` синтетическим тестом;
+- отсутствие ложных событий при неизменном state подтверждено;
+- PID `podkop-awg-failover` не изменился во время установки и тестов;
+- активный VPN остался `awg_main`.
 
-Перед финальным релизом требуется аппаратная проверка на Cudy/OpenWrt.
+OpenWrt 25.x: код рассчитан на совместимость, но аппаратная проверка v1.4.1 ещё не выполнена. После проверки будет обновлена документация; если потребуется изменение кода, будет выпущена следующая patch-версия.
 
 ## v1.3.9 — базовый мониторинг
 
@@ -50,9 +59,3 @@
 - контроль внешнего IP и страны выхода VPN;
 - state-файл состояния системы;
 - ежедневные диагностические логи.
-
-Проверено на:
-
-- Cudy
-- OpenWrt 25.x
-- Podkop 0.7.22
