@@ -23,28 +23,56 @@
 
 ## Текущая версия
 
-**v1.4.1 — HOME NET Monitoring.**
+**v1.5.0 — HOME NET unified bundle.**
 
-Аппаратно протестировано:
+Состав bundle:
 
-- Cudy
-- OpenWrt 24.10.4
-- Podkop + sing-box
-- AmneziaWG `awg_main` / `awg_backup`
-- установка без перезапуска failover
-- health state и event pipeline
-- FakeIP DNS
+- Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
+- HOME NET Monitoring: `v1.4.1`.
 
-Совместимость с OpenWrt 25.x предусмотрена кодом, но аппаратная проверка v1.4.1 на 25.x ещё не выполнена. После проверки информация будет обновлена; если потребуется изменение кода, будет выпущена следующая patch-версия.
+Аппаратно протестировано на Cudy / OpenWrt 24.10.4:
 
-## Быстрая установка
+- единая установка failover + Monitoring;
+- повторная установка без потери пользовательской конфигурации;
+- сохранение `AUTO_UPDATE_MODE=apply` на canary-router;
+- `awg_main` остаётся активным;
+- failover, health и updater watchdogs работают;
+- Monitoring сообщает `STATUS=OK`;
+- Podkop, sing-box и FakeIP работают;
+- stable updater успешно обновил failover `1.4.0 -> 1.4.1`.
 
-На OpenWrt:
+OpenWrt 25.x будет проверен следующим этапом. До завершения аппаратной проверки 25.x rollout следует выполнять сначала в режиме `check`.
+
+## Единая установка HOME NET
+
+Для обычного роутера безопасный режим автообновления по умолчанию — `check`:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh | sh
+```
+
+Для canary-router можно явно включить `apply`:
+
+```sh
+wget -qO /tmp/home-net-install-all.sh \
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh
+HOME_NET_AUTO_UPDATE_MODE=apply sh /tmp/home-net-install-all.sh
+```
+
+Manifest `bundle.conf` фиксирует совместимую комбинацию компонентных версий. Failover и Monitoring остаются отдельными компонентами и могут версионироваться независимо.
+
+## Только Monitoring
+
+Старый bootstrap Monitoring сохранён для отдельной установки:
 
 ```sh
 wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
 
-Текущий bootstrap для v1.4.1 жёстко привязан к проверенному релизному commit `d29183b745e1fee7f1ab999f37e7aacf564c18fd`, поэтому последующие изменения `main` не подменят устанавливаемую v1.4.1.
+Он устанавливает проверенный Monitoring v1.4.1 из зафиксированного commit.
 
-Подробности: `docs/INSTALL.md`.
+Подробности:
+
+- `docs/INSTALL.md` — Monitoring;
+- `docs/UNIFIED_INSTALL.md` — архитектура общего bundle;
+- failover auto-update: `openwrt-podkop-awg-failover/docs/AUTO_UPDATE.md`.
