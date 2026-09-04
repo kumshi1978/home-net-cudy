@@ -1,4 +1,4 @@
-# HOME NET Monitoring v1.4.1-dev
+# HOME NET Monitoring v1.4.1
 # Конфигурация проверки сервисов
 
 CHECK_GITHUB=1
