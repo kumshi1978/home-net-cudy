@@ -32,7 +32,7 @@ rotate_logs() {
 }
 
 get_country() {
-    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null
+    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null | tr -d '\r\n'
 }
 
 get_ip() {
@@ -44,13 +44,13 @@ get_wan_ip() {
 }
 
 get_direct_country() {
-    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null
+    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null | tr -d '\r\n'
 }
 
 check_fakeip() { /usr/bin/podkop-fakeip-check >/dev/null 2>&1; }
 
 check_singbox() {
-    ubus call service list '{"name":"sing-box"}' | grep -q '"running": true'
+    ubus call service list '{"name":"sing-box"}' 2>/dev/null | grep -q '"running": true'
 }
 
 check_podkop() {
@@ -59,24 +59,106 @@ check_podkop() {
     return 0
 }
 
+set_unknown() {
+    if [ "$STATUS" = "OK" ]; then
+        STATUS="UNKNOWN"
+        [ -n "${1:-}" ] && log "$1"
+    fi
+}
+
+set_fail() {
+    STATUS="FAIL"
+}
+
+mark_check_started() {
+    START_TMP="$STATE_FILE.started.tmp"
+    if [ -r "$STATE_FILE" ]; then
+        grep -v '^CHECK_STARTED=' "$STATE_FILE" > "$START_TMP"
+    else
+        echo "STATUS=UNKNOWN" > "$START_TMP"
+    fi
+    echo "CHECK_STARTED=$CHECK_STARTED" >> "$START_TMP"
+    mv "$START_TMP" "$STATE_FILE"
+}
+
 write_state() {
     TMP="$STATE_FILE.tmp"
     ACTIVE="$(uci -q get podkop.main.interface || echo unknown)"
-    ACTIVE_IP="$(get_ip "$ACTIVE")"
-    ACTIVE_COUNTRY="$(get_country "$ACTIVE")"
-    WAN_IP="$(get_wan_ip)"
-    WAN_COUNTRY="$(get_direct_country)"
-    MAIN_COUNTRY="$(get_country awg_main)"
-    BACKUP_COUNTRY="$(get_country awg_backup)"
-
+    ACTIVE_IP=""
+    ACTIVE_COUNTRY=""
+    WAN_IP=""
+    WAN_COUNTRY=""
+    MAIN_COUNTRY=""
+    BACKUP_COUNTRY=""
     STATUS="OK"
+    SERVICE_CHECK="SKIPPED"
 
-    [ -n "$ACTIVE_IP" ] && [ -n "$WAN_IP" ] && [ "$ACTIVE_IP" = "$WAN_IP" ] && STATUS="FAIL" && log "VPN BYPASS DETECTED"
-    [ "$ACTIVE_COUNTRY" = "RU" ] && STATUS="FAIL" && log "VPN COUNTRY RU DETECTED"
+    if check_singbox; then SING_BOX="RUNNING"; else SING_BOX="FAIL"; set_fail; log "SING-BOX CHECK FAILED"; fi
+    if check_podkop; then PODKOP="RUNNING"; else PODKOP="FAIL"; set_fail; log "PODKOP NFT/IP RULE CHECK FAILED"; fi
+    if [ "$STATUS" = "OK" ]; then
+        if check_fakeip; then FAKEIP="OK"; else FAKEIP="FAIL"; set_fail; log "FAKEIP CHECK FAILED"; fi
+    else
+        FAKEIP="SKIPPED"
+    fi
 
-    if check_singbox; then SING_BOX="RUNNING"; else SING_BOX="FAIL"; STATUS="FAIL"; fi
-    if check_podkop; then PODKOP="RUNNING"; else PODKOP="FAIL"; STATUS="FAIL"; fi
-    if check_fakeip; then FAKEIP="OK"; else FAKEIP="FAIL"; STATUS="FAIL"; log "FAKEIP CHECK FAILED"; fi
+    # External checks are ordered and fail-fast. Empty mandatory values are
+    # UNKNOWN, never OK, and prevent a cascade of further DNS/HTTP timeouts.
+    if [ "$STATUS" = "OK" ]; then
+        ACTIVE_IP="$(get_ip "$ACTIVE")"
+        [ -n "$ACTIVE_IP" ] || set_unknown "ACTIVE IP CHECK UNKNOWN"
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        ACTIVE_COUNTRY="$(get_country "$ACTIVE")"
+        if [ -z "$ACTIVE_COUNTRY" ]; then
+            set_unknown "ACTIVE COUNTRY CHECK UNKNOWN"
+        elif [ "$ACTIVE_COUNTRY" = "RU" ]; then
+            set_fail
+            log "VPN COUNTRY RU DETECTED"
+        fi
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        WAN_IP="$(get_wan_ip)"
+        if [ -z "$WAN_IP" ]; then
+            set_unknown "WAN IP CHECK UNKNOWN"
+        elif [ "$ACTIVE_IP" = "$WAN_IP" ]; then
+            set_fail
+            log "VPN BYPASS DETECTED"
+        fi
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        WAN_COUNTRY="$(get_direct_country)"
+        [ -n "$WAN_COUNTRY" ] || set_unknown "WAN COUNTRY CHECK UNKNOWN"
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        MAIN_COUNTRY="$(get_country awg_main)"
+        [ -n "$MAIN_COUNTRY" ] || set_unknown "AWG MAIN COUNTRY CHECK UNKNOWN"
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        BACKUP_COUNTRY="$(get_country awg_backup)"
+        [ -n "$BACKUP_COUNTRY" ] || set_unknown "AWG BACKUP COUNTRY CHECK UNKNOWN"
+    fi
+
+    if [ "$STATUS" = "OK" ]; then
+        RESULT="$($CHECK 2>&1)"
+        CHECK_RC=$?
+        case "$CHECK_RC" in
+            0) SERVICE_CHECK="OK" ;;
+            1) SERVICE_CHECK="FAIL"; set_fail ;;
+            2) SERVICE_CHECK="UNKNOWN"; set_unknown "SERVICE CHECK UNKNOWN" ;;
+            *) SERVICE_CHECK="FAIL"; set_fail; log "SERVICE CHECK INVALID EXIT CODE: $CHECK_RC" ;;
+        esac
+    else
+        RESULT="SERVICE CHECK SKIPPED: base health status is $STATUS"
+    fi
+
+    LAST_CHECK="$(date '+%F %T')"
+    CHECK_FINISHED_EPOCH="$(date +%s)"
+    CHECK_DURATION_SEC=$((CHECK_FINISHED_EPOCH - CHECK_STARTED_EPOCH))
 
     {
         echo "STATUS=$STATUS"
@@ -90,7 +172,10 @@ write_state() {
         echo "PODKOP=$PODKOP"
         echo "SING_BOX=$SING_BOX"
         echo "FAKEIP=$FAKEIP"
-        echo "LAST_CHECK=$(date '+%F %T')"
+        echo "SERVICE_CHECK=$SERVICE_CHECK"
+        echo "CHECK_STARTED=$CHECK_STARTED"
+        echo "LAST_CHECK=$LAST_CHECK"
+        echo "CHECK_DURATION_SEC=$CHECK_DURATION_SEC"
     } > "$TMP"
 
     mv "$TMP" "$STATE_FILE"
@@ -110,11 +195,13 @@ write_daily_log() {
 while true
 do
     rotate_logs
-    RESULT="$($CHECK 2>&1)"
-    write_daily_log
+    CHECK_STARTED_EPOCH="$(date +%s)"
+    CHECK_STARTED="$(date '+%F %T')"
+    mark_check_started
     write_state
+    write_daily_log
     run_event_pipeline
 
-    if [ "$STATUS" = "OK" ]; then log "HOME NET OK active=$(uci -q get podkop.main.interface)"; else log "HOME NET WARNING"; fi
+    if [ "$STATUS" = "OK" ]; then log "HOME NET OK active=$(uci -q get podkop.main.interface)"; else log "HOME NET $STATUS"; fi
     sleep "$INTERVAL"
 done
