@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Установщик мониторинга Podkop
-# Версия: 1.4.1
+# Версия: 1.4.2
 
 set -e
 
@@ -73,6 +73,14 @@ cp "$INIT_SRC" /etc/init.d/podkop-service-health
 
 if [ ! -f "$CONF_DST" ]; then
     cp "$CONF_SRC" "$CONF_DST"
+else
+    OLD_FAKEIP='FAKEIP_DOMAINS="github.com unifi.ui.com claude.ai gemini.google.com"'
+    NEW_FAKEIP='FAKEIP_DOMAINS="github.com claude.ai gemini.google.com"'
+
+    if grep -Fxq "$OLD_FAKEIP" "$CONF_DST"; then
+        sed -i 's|^FAKEIP_DOMAINS="github.com unifi.ui.com claude.ai gemini.google.com"$|FAKEIP_DOMAINS="github.com claude.ai gemini.google.com"|' "$CONF_DST"
+        echo "Migrated legacy default FAKEIP_DOMAINS; custom values are preserved"
+    fi
 fi
 
 chmod 0755 \
@@ -86,4 +94,4 @@ chmod 0755 \
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
 
-echo "HOME NET Podkop Monitor v1.4.1 installed"
+echo "HOME NET Podkop Monitor v1.4.2 installed"
