@@ -1,9 +1,10 @@
 #!/bin/sh
 # HOME NET Cudy
 # Проверка состояния Podkop, AmneziaWG и доступности сервисов
-# Версия: 1.4.2
+# Версия: 1.4.3
 
 TAG="podkop-service-check"
+COUNTRY_LOOKUP="${PODKOP_COUNTRY_LOOKUP:-/usr/bin/podkop-country-lookup}"
 
 check_country() {
     NAME="$1"
@@ -16,7 +17,7 @@ check_country() {
     }
 
     echo "--- $NAME ($IFACE) ---"
-    COUNTRY=$(curl -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null)
+    COUNTRY=$("$COUNTRY_LOOKUP" "$IFACE" 2>/dev/null)
     echo "Country: $COUNTRY"
 
     if [ -z "$COUNTRY" ]; then

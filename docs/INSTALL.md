@@ -6,24 +6,27 @@
 
 ## Быстрая установка из GitHub
 
-Для v1.4.2:
+Monitoring v1.4.3 пока является release candidate. После публикации tag:
 
 ```sh
 wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
 
-Bootstrap-установщик:
+Bootstrap-установщик v1.4.3:
 
 - проверяет, что система — OpenWrt;
-- скачивает архив строго по релизному commit `4b407abcaa407f8b23c1c3b529466790fd2b242e`;
-- проверяет, что `VERSION=1.4.2`;
+- скачивает архив строго по release commit
+  `4ca7f606dfc4f1f9e8cca4b2fd7ab3158afcea00` либо явно заданному
+  `HOME_NET_RELEASE_REF`;
+- проверяет, что `MONITORING_VERSION=1.4.3`;
 - распаковывает архив во временный каталог `/tmp`;
 - запускает встроенный `install/install.sh`;
 - удаляет временные файлы после завершения.
 
 Реальный GitHub token на роутере не требуется.
 
-При необходимости ref можно переопределить переменной `HOME_NET_RELEASE_REF`, но для штатной установки v1.4.2 это не требуется.
+До публикации release аппаратный тест выполняется только с явно заданным
+commit SHA через `HOME_NET_RELEASE_REF`.
 
 ## Установка из уже скачанного репозитория
 
@@ -51,6 +54,7 @@ sh install/install.sh
 - `scripts/podkop-fakeip-check`
 - `scripts/podkop-event-monitor`
 - `scripts/podkop-event-runner`
+- `scripts/podkop-country-lookup`
 - `init.d/podkop-service-health`
 
 Копируются в:
@@ -114,3 +118,8 @@ Monitoring v1.4.2 аппаратно проверен на двух реальн
 - installer не меняет Podkop DNS, AmneziaWG или failover сам по себе.
 
 HOME NET bundle v1.5.1 с Monitoring v1.4.2 также прошёл unified-install тест на обеих ветках OpenWrt.
+
+Monitoring v1.4.3 добавляет country-provider fallback
+`ipinfo.io -> ipapi.co -> api.country.is`. До отдельной аппаратной проверки он
+остаётся release candidate; подтверждённые результаты v1.4.2 выше сохраняются
+как исторический baseline.

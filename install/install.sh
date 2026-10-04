@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Установщик мониторинга Podkop
-# Версия: 1.4.2
+# Версия: 1.4.3
 
 set -e
 
@@ -14,6 +14,7 @@ CHECK_SRC="$BASE_DIR/../scripts/podkop-service-check"
 FAKEIP_SRC="$BASE_DIR/../scripts/podkop-fakeip-check"
 EVENT_MONITOR_SRC="$BASE_DIR/../scripts/podkop-event-monitor"
 EVENT_RUNNER_SRC="$BASE_DIR/../scripts/podkop-event-runner"
+COUNTRY_LOOKUP_SRC="$BASE_DIR/../scripts/podkop-country-lookup"
 INIT_SRC="$BASE_DIR/../init.d/podkop-service-health"
 
 fail() {
@@ -33,6 +34,7 @@ for FILE in \
     "$FAKEIP_SRC" \
     "$EVENT_MONITOR_SRC" \
     "$EVENT_RUNNER_SRC" \
+    "$COUNTRY_LOOKUP_SRC" \
     "$INIT_SRC" \
     "$CONF_SRC"
 do
@@ -44,7 +46,8 @@ for FILE in \
     "$CHECK_SRC" \
     "$FAKEIP_SRC" \
     "$EVENT_MONITOR_SRC" \
-    "$EVENT_RUNNER_SRC"
+    "$EVENT_RUNNER_SRC" \
+    "$COUNTRY_LOOKUP_SRC"
 do
     sh -n "$FILE"
 done
@@ -58,6 +61,7 @@ for FILE in \
     /usr/bin/podkop-fakeip-check \
     /usr/bin/podkop-event-monitor \
     /usr/bin/podkop-event-runner \
+    /usr/bin/podkop-country-lookup \
     /etc/init.d/podkop-service-health \
     "$CONF_DST"
 do
@@ -69,6 +73,7 @@ cp "$CHECK_SRC" /usr/bin/podkop-service-check
 cp "$FAKEIP_SRC" /usr/bin/podkop-fakeip-check
 cp "$EVENT_MONITOR_SRC" /usr/bin/podkop-event-monitor
 cp "$EVENT_RUNNER_SRC" /usr/bin/podkop-event-runner
+cp "$COUNTRY_LOOKUP_SRC" /usr/bin/podkop-country-lookup
 cp "$INIT_SRC" /etc/init.d/podkop-service-health
 
 if [ ! -f "$CONF_DST" ]; then
@@ -89,9 +94,10 @@ chmod 0755 \
     /usr/bin/podkop-fakeip-check \
     /usr/bin/podkop-event-monitor \
     /usr/bin/podkop-event-runner \
+    /usr/bin/podkop-country-lookup \
     /etc/init.d/podkop-service-health
 
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
 
-echo "HOME NET Podkop Monitor v1.4.2 installed"
+echo "HOME NET Podkop Monitor v1.4.3 installed"
