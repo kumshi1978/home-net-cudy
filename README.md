@@ -30,20 +30,30 @@
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
 - HOME NET Monitoring: `v1.4.2`.
 
-Аппаратная проверка компонентов:
+Аппаратная проверка v1.5.1 завершена на обеих поддерживаемых ветках OpenWrt:
 
-- HOME NET bundle v1.5.0 ранее проверен на Cudy / OpenWrt 24.10.4;
-- Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5: OK/UNKNOWN/FAIL, fail-fast, HTTP 451 и FakeIP probes;
-- HOME NET bundle v1.5.1 является release-candidate до отдельной проверки через единый installer.
+- квартирный основной Cudy / OpenWrt 24.10.4 — PASS;
+- квартирный резервный Cudy / OpenWrt 25.12.5 — PASS.
 
-Rollout выполнять поэтапно: OpenWrt 24.x и 25.x проверяются как отдельные группы.
+На обеих системах подтверждены единая установка HOME NET v1.5.1, Failover v1.4.1, Monitoring v1.4.2, работа Podkop/sing-box/FakeIP и итоговый `STATUS=OK`. На OpenWrt 25.12.5 дополнительно аппаратно проверены сценарии `OK / UNKNOWN / FAIL`, fail-fast и обработка HTTP 451.
+
+Текущая rollout-политика:
+
+- квартирный основной Cudy / OpenWrt 24.10.4 — canary-router, `AUTO_UPDATE_MODE='apply'`;
+- квартирный резервный Cudy / OpenWrt 25.12.5 — `AUTO_UPDATE_MODE='check'`;
+- дачные Cudy обновляются отдельной волной, когда будет доступ к площадке.
 
 ## Единая установка HOME NET
 
-Для обычного роутера безопасный режим автообновления по умолчанию — `check`:
+Для обычного роутера безопасный режим автообновления по умолчанию — `check`. Для стабильной установки используйте опубликованный release tag:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh | sh
+wget -qO /tmp/home-net-install-all.sh \
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.1/install-all.sh
+
+HOME_NET_BUNDLE_REF=v1.5.1 \
+HOME_NET_AUTO_UPDATE_MODE=check \
+sh /tmp/home-net-install-all.sh
 ```
 
 Для canary-router можно явно включить `apply`:
