@@ -23,12 +23,12 @@
 
 ## Текущая версия
 
-**v1.5.0 — HOME NET unified bundle.**
+**v1.5.1 — HOME NET unified bundle.**
 
 Состав bundle:
 
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
-- HOME NET Monitoring: `v1.4.1`.
+- HOME NET Monitoring: `v1.4.2`.
 
 Аппаратно протестировано на Cudy / OpenWrt 24.10.4:
 
@@ -41,7 +41,7 @@
 - Podkop, sing-box и FakeIP работают;
 - stable updater успешно обновил failover `1.4.0 -> 1.4.1`.
 
-OpenWrt 25.x будет проверен следующим этапом. До завершения аппаратной проверки 25.x rollout следует выполнять сначала в режиме `check`.
+Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5: OK/UNKNOWN/FAIL, fail-fast, HTTP 451 и FakeIP probes. Для остальных устройств rollout по-прежнему выполнять поэтапно.
 
 ## Единая установка HOME NET
 
@@ -69,7 +69,7 @@ Manifest `bundle.conf` фиксирует совместимую комбина�
 wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
 
-Он устанавливает проверенный Monitoring v1.4.1 из зафиксированного commit.
+Он устанавливает проверенный Monitoring v1.4.2 из зафиксированного commit.
 
 Подробности:
 
