@@ -53,10 +53,10 @@ Bootstrap:
 HOME NET bundle должен хранить явные версии компонентов, например:
 
 ```text
-HOME_NET_BUNDLE_VERSION='1.0.0'
+HOME_NET_BUNDLE_VERSION='1.5.1'
 FAILOVER_VERSION='1.4.1'
-MONITORING_VERSION='1.4.1'
-MONITORING_REF='d29183b745e1fee7f1ab999f37e7aacf564c18fd'
+MONITORING_VERSION='1.4.2'
+MONITORING_BOOTSTRAP_REF='4815fbacca19c26892a7880101abf902c83a9f81'
 ```
 
 Bootstrap не должен устанавливать произвольный текущий `main` компонентов.
@@ -110,6 +110,28 @@ AUTO_UPDATE_MODE='apply'
 
 версия разрешается для следующей волны роутеров.
 
+## Статус аппаратной проверки v1.5.1
+
+HOME NET v1.5.1 проверен через единый `install-all.sh` на двух реальных Cudy:
+
+- OpenWrt 24.10.4 — PASS;
+- OpenWrt 25.12.5 — PASS.
+
+На обеих системах подтверждены:
+
+- Failover v1.4.1;
+- Monitoring v1.4.2;
+- активный `awg_main`;
+- Podkop nft table и policy rule;
+- `STATUS=OK`;
+- `SERVICE_CHECK=OK`;
+- `FAKEIP=OK`;
+- updater/failover/health/monitoring daemons запущены.
+
+Canary-router: квартирный основной Cudy / OpenWrt 24.10.4 с `AUTO_UPDATE_MODE='apply'`. Остальные роутеры по умолчанию остаются в `check`.
+
+Важно: текущий автоматический updater обновляет только компонент failover. Автоматического обновления всего HOME NET bundle / Monitoring пока нет; это отдельный следующий этап архитектуры.
+
 ## Единый updater
 
 На первом этапе компонентный updater `openwrt-podkop-awg-failover` остаётся источником автоматического обновления failover.
@@ -157,7 +179,12 @@ Installer работает поверх уже существующей лока
 После выпуска HOME NET bundle пользователь должен иметь одну команду установки, например:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh | sh
+wget -qO /tmp/home-net-install-all.sh \
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.1/install-all.sh
+
+HOME_NET_BUNDLE_REF=v1.5.1 \
+HOME_NET_AUTO_UPDATE_MODE=check \
+sh /tmp/home-net-install-all.sh
 ```
 
 Для canary:
