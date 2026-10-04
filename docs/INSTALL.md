@@ -15,7 +15,8 @@ wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/instal
 Bootstrap-установщик v1.4.3:
 
 - проверяет, что система — OpenWrt;
-- скачивает архив строго по release tag `v1.4.3` либо явно заданному
+- скачивает архив строго по release commit
+  `4ca7f606dfc4f1f9e8cca4b2fd7ab3158afcea00` либо явно заданному
   `HOME_NET_RELEASE_REF`;
 - проверяет, что `MONITORING_VERSION=1.4.3`;
 - распаковывает архив во временный каталог `/tmp`;
