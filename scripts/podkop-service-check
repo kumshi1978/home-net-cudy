@@ -10,15 +10,21 @@ check_country() {
     IFACE="$2"
 
     ip link show "$IFACE" >/dev/null 2>&1 || {
-        echo "--- $NAME ($IFACE) SKIPPED ---"
-        return 0
+        echo "--- $NAME ($IFACE) ---"
+        echo "STATUS: UNKNOWN (interface missing)"
+        return 2
     }
 
     echo "--- $NAME ($IFACE) ---"
     COUNTRY=$(curl -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null)
     echo "Country: $COUNTRY"
 
-    if [ "$COUNTRY" = "RU" ] || [ -z "$COUNTRY" ]; then
+    if [ -z "$COUNTRY" ]; then
+        echo "STATUS: UNKNOWN"
+        return 2
+    fi
+
+    if [ "$COUNTRY" = "RU" ]; then
         echo "STATUS: FAIL"
         return 1
     fi
@@ -34,17 +40,26 @@ check_url() {
     CODE=$(curl -4 -L -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 20 "$URL")
     case "$CODE" in
         200|301|302|401|403) echo "OK ($CODE)"; return 0 ;;
+        451) echo "REACHABLE/HTTP_DENIED ($CODE)"; return 0 ;;
+        000) echo "UNKNOWN ($CODE)"; return 2 ;;
+        5??) echo "FAIL ($CODE)"; return 1 ;;
         *) echo "FAIL ($CODE)"; return 1 ;;
     esac
 }
 
-FAIL=0
-check_country "AWG MAIN" awg_main || FAIL=1
-check_country "AWG BACKUP" awg_backup || FAIL=1
+check_country "AWG MAIN" awg_main
+RESULT=$?
+[ "$RESULT" -eq 0 ] || exit "$RESULT"
+
+check_country "AWG BACKUP" awg_backup
+RESULT=$?
+[ "$RESULT" -eq 0 ] || exit "$RESULT"
 
 for URL in https://github.com https://api.github.com https://raw.githubusercontent.com https://unifi.ui.com https://claude.ai
 do
-    check_url "$URL" "$URL" || FAIL=1
+    check_url "$URL" "$URL"
+    RESULT=$?
+    [ "$RESULT" -eq 0 ] || exit "$RESULT"
 done
 
-exit $FAIL
+exit 0
