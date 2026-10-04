@@ -217,6 +217,12 @@ SERVICE_CHECK=OK
 `ACTIVE_VERSION`. Если installer уже успешно записал файлы, новая версия
 фиксируется как `INSTALLED_VERSION`, а state становится `FAILED`.
 
+Прямой bootstrap через `install-all.sh` применяет тот же набор обязательных
+полей и принимает только новый завершённый Monitoring cycle. При неуспехе он
+возвращает ненулевой код, сохраняет новую `INSTALLED_VERSION`, но оставляет
+предыдущую `ACTIVE_VERSION`. Если прежняя active-version достоверно неизвестна,
+в state явно записывается `ACTIVE_VERSION='unknown'`.
+
 ## Lock и восстановление
 
 Одновременные проверки блокируются каталогом:

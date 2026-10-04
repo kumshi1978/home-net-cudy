@@ -17,6 +17,10 @@ HOME_NET_UPDATE_STATE="${HOME_NET_UPDATE_STATE:-/etc/home-net-update.state}"
 HOME_NET_FAILOVER_CONF="${HOME_NET_FAILOVER_CONF:-/etc/podkop-awg-failover.conf}"
 HOME_NET_OPENWRT_RELEASE="${HOME_NET_OPENWRT_RELEASE:-/etc/openwrt_release}"
 HOME_NET_UPDATER_BACKUP_ROOT="${HOME_NET_UPDATER_BACKUP_ROOT:-/root}"
+HOME_NET_HEALTH_STATE="${HOME_NET_HEALTH_STATE:-/tmp/podkop-service-health/state}"
+HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT="${HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT:-600}"
+HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL="${HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL:-10}"
+HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES="${HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES:-3}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() { rm -rf "$TMP_DIR"; }
@@ -66,6 +70,107 @@ install_shell_atomically() {
     }
 }
 
+state_value() {
+    state_key="$1"
+    state_file="$2"
+    [ -r "$state_file" ] || return 0
+    sed -n "s/^${state_key}='\([^']*\)'$/\1/p" "$state_file" | tail -n 1
+}
+
+health_value() {
+    health_key="$1"
+    [ -r "$HOME_NET_HEALTH_STATE" ] || return 0
+    sed -n "s/^${health_key}=//p" "$HOME_NET_HEALTH_STATE" | tail -n 1
+}
+
+evaluate_bootstrap_health() {
+    health_status="$(health_value STATUS)"
+    BOOTSTRAP_HEALTH_RESULT="$health_status"
+    [ "$health_status" = "OK" ] || {
+        [ "$health_status" = "UNKNOWN" ] || BOOTSTRAP_HEALTH_RESULT=FAIL
+        return 1
+    }
+
+    for required_health in \
+        PODKOP=RUNNING \
+        SING_BOX=RUNNING \
+        FAKEIP=OK \
+        SERVICE_CHECK=OK
+    do
+        health_key=${required_health%%=*}
+        health_expected=${required_health#*=}
+        [ "$(health_value "$health_key")" = "$health_expected" ] || {
+            BOOTSTRAP_HEALTH_RESULT=FAIL
+            return 1
+        }
+    done
+    BOOTSTRAP_HEALTH_RESULT=OK
+    return 0
+}
+
+wait_for_fresh_bootstrap_health() {
+    before_last="$1"
+    before_started="$2"
+    elapsed=0
+    bad_cycles=0
+    seen_last="$before_last"
+    BOOTSTRAP_HEALTH_RESULT=UNKNOWN
+
+    while [ "$elapsed" -lt "$HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT" ]; do
+        last_check="$(health_value LAST_CHECK)"
+        check_started="$(health_value CHECK_STARTED)"
+        fresh=0
+        [ -n "$last_check" ] && [ "$last_check" != "$seen_last" ] && fresh=1
+        if [ "$fresh" -eq 0 ] && [ -n "$last_check" ] && \
+           [ "$check_started" != "$before_started" ] && [ "$last_check" = "$check_started" ]; then
+            fresh=1
+        fi
+
+        if [ "$fresh" -eq 1 ]; then
+            seen_last="$last_check"
+            before_started="$check_started"
+            if evaluate_bootstrap_health; then
+                return 0
+            fi
+            bad_cycles=$((bad_cycles + 1))
+            [ "$bad_cycles" -lt "$HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES" ] || return 1
+        fi
+
+        sleep "$HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL"
+        elapsed=$((elapsed + HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL))
+    done
+
+    [ "$bad_cycles" -gt 0 ] || BOOTSTRAP_HEALTH_RESULT=UNKNOWN
+    return 1
+}
+
+write_bootstrap_state() {
+    active_version="$1"
+    update_status="$2"
+    pending_action="$3"
+    pending_reason="$4"
+    health_result="$5"
+    pending_version="$HOME_NET_BUNDLE_VERSION"
+    if [ "$pending_action" = none ]; then
+        pending_version=none
+    fi
+    state_tmp="$HOME_NET_UPDATE_STATE.tmp.$$"
+    {
+        printf "INSTALLED_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
+        printf "ACTIVE_VERSION='%s'\n" "$active_version"
+        printf "UPDATE_STATUS='%s'\n" "$update_status"
+        printf "PENDING_ACTION='%s'\n" "$pending_action"
+        printf "PENDING_REASON='%s'\n" "$pending_reason"
+        printf "PENDING_VERSION='%s'\n" "$pending_version"
+        printf "PENDING_BOOT_ID='none'\n"
+        printf "LAST_UPDATE='%s'\n" "$(date '+%F %T')"
+        printf "LAST_HEALTH_STATUS='%s'\n" "$health_result"
+        printf "INSTALL_SOURCE='install-all'\n"
+    } > "$state_tmp"
+    chmod 0600 "$state_tmp"
+    mv "$state_tmp" "$HOME_NET_UPDATE_STATE"
+}
+
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
@@ -86,6 +191,11 @@ case "$AUTO_UPDATE_MODE" in check|apply) ;; *) fail "HOME_NET_AUTO_UPDATE_MODE m
 
 printf 'HOME NET bundle %s\n' "$HOME_NET_BUNDLE_VERSION"
 printf 'Failover %s, Monitoring %s, auto-update %s, action class %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION" "$AUTO_UPDATE_MODE" "$ACTION_CLASS"
+
+PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
+[ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_VERSION "$HOME_NET_UPDATE_STATE")"
+[ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_BUNDLE_VERSION "$HOME_NET_UPDATE_STATE")"
+[ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION=unknown
 
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
@@ -135,6 +245,8 @@ if [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ];
 fi
 
 printf '\n===== INSTALL MONITORING =====\n'
+BOOTSTRAP_BEFORE_LAST="$(health_value LAST_CHECK)"
+BOOTSTRAP_BEFORE_STARTED="$(health_value CHECK_STARTED)"
 sh "$MONITORING_INSTALL"
 
 printf '\n===== INSTALL HOME NET UPDATER =====\n'
@@ -164,26 +276,17 @@ uci -q get podkop.main.interface 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-awg-update' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-awg-failover' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-health' 2>/dev/null || true
-cat /tmp/podkop-service-health/state 2>/dev/null || true
+cat "$HOME_NET_HEALTH_STATE" 2>/dev/null || true
 
 if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
-    FINAL_HEALTH_STATUS="$(sed -n 's/^STATUS=//p' /tmp/podkop-service-health/state 2>/dev/null | tail -n 1)"
-    [ -n "$FINAL_HEALTH_STATUS" ] || FINAL_HEALTH_STATUS=UNKNOWN
-    STATE_TMP="$HOME_NET_UPDATE_STATE.tmp.$$"
-    {
-        printf "INSTALLED_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
-        printf "ACTIVE_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
-        printf "UPDATE_STATUS='OK'\n"
-        printf "PENDING_ACTION='none'\n"
-        printf "PENDING_REASON='none'\n"
-        printf "PENDING_VERSION='none'\n"
-        printf "PENDING_BOOT_ID='none'\n"
-        printf "LAST_UPDATE='%s'\n" "$(date '+%F %T')"
-        printf "LAST_HEALTH_STATUS='%s'\n" "$FINAL_HEALTH_STATUS"
-        printf "INSTALL_SOURCE='install-all'\n"
-    } > "$STATE_TMP"
-    chmod 0600 "$STATE_TMP"
-    mv "$STATE_TMP" "$HOME_NET_UPDATE_STATE"
+    printf '\n===== WAIT FOR FRESH MONITORING CYCLE =====\n'
+    if wait_for_fresh_bootstrap_health "$BOOTSTRAP_BEFORE_LAST" "$BOOTSTRAP_BEFORE_STARTED"; then
+        write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+    else
+        write_bootstrap_state "$PREVIOUS_ACTIVE_VERSION" FAILED verification \
+            'fresh bootstrap health did not become OK' "$BOOTSTRAP_HEALTH_RESULT"
+        fail "bundle files installed, but fresh bootstrap health is $BOOTSTRAP_HEALTH_RESULT; active version was not changed"
+    fi
 fi
 
 printf '\nHOME NET bundle installation complete.\n'

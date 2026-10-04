@@ -58,10 +58,56 @@ UPDATE_PENDING_ACTION='none'
 UPDATE_PENDING_REASON=''
 EOF_BUNDLE
 
-cat > "$PAYLOADS/monitoring-install.sh" <<'EOF_MONITORING'
+write_monitoring_installer() {
+    cat > "$PAYLOADS/monitoring-install.sh" <<'EOF_MONITORING'
 #!/bin/sh
+case "${MOCK_HEALTH_MODE:-stale}" in
+    stale) exit 0 ;;
+    OK|UNKNOWN|FAIL|MISSING_SERVICE_CHECK)
+        status="$MOCK_HEALTH_MODE"
+        [ "$status" = MISSING_SERVICE_CHECK ] && status=OK
+        {
+            printf 'STATUS=%s\n' "$status"
+            printf '%s\n' 'PODKOP=RUNNING'
+            printf '%s\n' 'SING_BOX=RUNNING'
+            printf '%s\n' 'FAKEIP=OK'
+            [ "$MOCK_HEALTH_MODE" = MISSING_SERVICE_CHECK ] || printf '%s\n' 'SERVICE_CHECK=OK'
+            printf '%s\n' 'CHECK_STARTED=2099-01-01 00:00:01'
+            printf '%s\n' 'LAST_CHECK=2099-01-01 00:00:02'
+        } > "$HOME_NET_HEALTH_STATE"
+        ;;
+    *) exit 2 ;;
+esac
 exit 0
 EOF_MONITORING
+}
+
+write_old_health() {
+    cat > "$TARGET/health.state" <<'EOF_HEALTH'
+STATUS=OK
+PODKOP=RUNNING
+SING_BOX=RUNNING
+FAKEIP=OK
+SERVICE_CHECK=OK
+CHECK_STARTED=2000-01-01 00:00:01
+LAST_CHECK=2000-01-01 00:00:02
+EOF_HEALTH
+}
+
+write_previous_state() {
+    cat > "$TARGET/home-net-update.state" <<'EOF_STATE'
+INSTALLED_VERSION='1.5.1'
+ACTIVE_VERSION='1.5.1'
+UPDATE_STATUS='OK'
+LAST_HEALTH_STATUS='OK'
+EOF_STATE
+}
+
+state_value() {
+    sed -n "s/^$1='\([^']*\)'$/\1/p" "$TARGET/home-net-update.state"
+}
+
+write_monitoring_installer
 
 cat > "$PAYLOADS/home-net-update" <<'EOF_UPDATER'
 #!/bin/sh
@@ -86,9 +132,10 @@ run_installer() {
     set +e
     PATH="$BIN:$PATH" \
     MOCK_PAYLOADS="$PAYLOADS" \
+    MOCK_HEALTH_MODE="$TEST_HEALTH_MODE" \
     HOME_NET_BUNDLE_REF='test-ref' \
     HOME_NET_UPDATE_IN_PROGRESS='1' \
-    HOME_NET_SKIP_VERSION_RECORD='1' \
+    HOME_NET_SKIP_VERSION_RECORD="$TEST_SKIP_VERSION_RECORD" \
     HOME_NET_OPENWRT_RELEASE="$TARGET/openwrt_release" \
     HOME_NET_FAILOVER_CONF="$TARGET/failover.conf" \
     HOME_NET_UPDATE_BIN="$TARGET/home-net-update" \
@@ -96,6 +143,10 @@ run_installer() {
     HOME_NET_UPDATE_CONF="$TARGET/home-net-update.conf" \
     HOME_NET_UPDATE_STATE="$TARGET/home-net-update.state" \
     HOME_NET_UPDATER_BACKUP_ROOT="$TARGET/backups" \
+    HOME_NET_HEALTH_STATE="$TARGET/health.state" \
+    HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT='1' \
+    HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL='1' \
+    HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES='1' \
     sh "$INSTALLER" > "$TMP/output" 2>&1
     RUN_RC=$?
     set -e
@@ -116,11 +167,69 @@ exec '$REAL_CP' "\$@"
 EOF_CP
 chmod +x "$BIN/cp"
 
+TEST_SKIP_VERSION_RECORD=1
+TEST_HEALTH_MODE=stale
 run_installer
 [ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
 grep -Fq 'new-updater' "$TARGET/home-net-update"
 [ -x "$TARGET/home-net-update" ]
 echo 'PASS atomic_self_update'
+
+run_bootstrap_case() {
+    expected_rc="$1"
+    health_mode="$2"
+    expected_active="$3"
+    expected_status="$4"
+    expected_health="$5"
+    TEST_SKIP_VERSION_RECORD=0
+    TEST_HEALTH_MODE="$health_mode"
+    write_monitoring_installer
+    write_old_health
+    write_previous_state
+    run_installer
+    [ "$RUN_RC" -eq "$expected_rc" ] || { cat "$TMP/output" >&2; exit 1; }
+    [ "$(state_value INSTALLED_VERSION)" = 1.5.2 ]
+    [ "$(state_value ACTIVE_VERSION)" = "$expected_active" ]
+    [ "$(state_value UPDATE_STATUS)" = "$expected_status" ]
+    [ "$(state_value LAST_HEALTH_STATUS)" = "$expected_health" ]
+}
+
+run_bootstrap_case 0 OK 1.5.2 OK OK
+echo 'PASS bootstrap_fresh_health_ok'
+
+run_bootstrap_case 1 stale 1.5.1 FAILED UNKNOWN
+echo 'PASS bootstrap_stale_health_rejected'
+
+run_bootstrap_case 1 UNKNOWN 1.5.1 FAILED UNKNOWN
+echo 'PASS bootstrap_fresh_health_unknown'
+
+run_bootstrap_case 1 FAIL 1.5.1 FAILED FAIL
+echo 'PASS bootstrap_fresh_health_fail'
+
+run_bootstrap_case 1 MISSING_SERVICE_CHECK 1.5.1 FAILED FAIL
+echo 'PASS bootstrap_missing_service_check'
+
+TEST_SKIP_VERSION_RECORD=0
+TEST_HEALTH_MODE=UNKNOWN
+write_monitoring_installer
+write_old_health
+rm -f "$TARGET/home-net-update.state"
+run_installer
+[ "$RUN_RC" -ne 0 ] || exit 1
+[ "$(state_value INSTALLED_VERSION)" = 1.5.2 ]
+[ "$(state_value ACTIVE_VERSION)" = unknown ]
+[ "$(state_value UPDATE_STATUS)" = FAILED ]
+echo 'PASS bootstrap_unknown_previous_active_is_explicit'
+
+TEST_SKIP_VERSION_RECORD=1
+TEST_HEALTH_MODE=OK
+write_monitoring_installer
+write_old_health
+printf '%s\n' "SENTINEL='preserve-me'" > "$TARGET/home-net-update.state"
+run_installer
+[ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
+grep -Fqx "SENTINEL='preserve-me'" "$TARGET/home-net-update.state"
+echo 'PASS skip_version_record_preserves_state'
 
 # The Monitoring installer is executable payload, so every guarded disruptive
 # command form must be rejected before it or the updater installation runs.
@@ -138,6 +247,8 @@ do
         printf '%s\n' "$disruptive_action"
     } > "$PAYLOADS/monitoring-install.sh"
     "$REAL_CP" "$TARGET/original-updater" "$TARGET/home-net-update"
+    TEST_SKIP_VERSION_RECORD=1
+    TEST_HEALTH_MODE=stale
     run_installer
     [ "$RUN_RC" -ne 0 ] || exit 1
     grep -Fq 'monitoring installer contains a forbidden network restart or reboot' "$TMP/output"
