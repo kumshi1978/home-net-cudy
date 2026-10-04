@@ -93,16 +93,24 @@ ip rule show | grep -E 'lookup[[:space:]]+podkop([[:space:]]|$)'
 
 ## Совместимость и аппаратная проверка
 
-Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5 с BusyBox ash, Podkop + sing-box и AmneziaWG `awg_main` / `awg_backup`.
+Monitoring v1.4.2 аппаратно проверен на двух реальных Cudy:
+
+- OpenWrt 24.10.4 — PASS;
+- OpenWrt 25.12.5 — PASS.
 
 Подтверждены:
 
 - штатный `STATUS=OK`;
-- `STATUS=UNKNOWN` при пустом обязательном сетевом результате;
-- `STATUS=FAIL` при критическом локальном отказе;
-- fail-fast без каскада внешних timeout;
-- HTTP 451 как `REACHABLE/HTTP_DENIED`;
+- `SERVICE_CHECK=OK`;
+- `PODKOP=RUNNING`;
+- `SING_BOX=RUNNING`;
+- `FAKEIP=OK`;
+- `podkop-service-check` возвращает rc=0;
+- `podkop-fakeip-check` возвращает rc=0;
 - FakeIP probes без `unifi.ui.com`;
-- installer не меняет Podkop DNS, AmneziaWG или failover.
+- на OpenWrt 25.12.5 отдельно проверены `STATUS=UNKNOWN` и `STATUS=FAIL`;
+- fail-fast предотвращает каскад внешних timeout;
+- HTTP 451 обрабатывается как `REACHABLE/HTTP_DENIED`;
+- installer не меняет Podkop DNS, AmneziaWG или failover сам по себе.
 
-На OpenWrt 24.10.4 ранее аппаратно проверен Monitoring v1.4.1. Monitoring v1.4.2 на 24.10.4 должен пройти отдельный rollout-test перед массовым обновлением этой группы.
+HOME NET bundle v1.5.1 с Monitoring v1.4.2 также прошёл unified-install тест на обеих ветках OpenWrt.
