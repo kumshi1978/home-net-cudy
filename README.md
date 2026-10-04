@@ -30,18 +30,13 @@
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
 - HOME NET Monitoring: `v1.4.2`.
 
-Аппаратно протестировано на Cudy / OpenWrt 24.10.4:
+Аппаратная проверка компонентов:
 
-- единая установка failover + Monitoring;
-- повторная установка без потери пользовательской конфигурации;
-- сохранение `AUTO_UPDATE_MODE=apply` на canary-router;
-- `awg_main` остаётся активным;
-- failover, health и updater watchdogs работают;
-- Monitoring сообщает `STATUS=OK`;
-- Podkop, sing-box и FakeIP работают;
-- stable updater успешно обновил failover `1.4.0 -> 1.4.1`.
+- HOME NET bundle v1.5.0 ранее проверен на Cudy / OpenWrt 24.10.4;
+- Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5: OK/UNKNOWN/FAIL, fail-fast, HTTP 451 и FakeIP probes;
+- HOME NET bundle v1.5.1 является release-candidate до отдельной проверки через единый installer.
 
-Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5: OK/UNKNOWN/FAIL, fail-fast, HTTP 451 и FakeIP probes. Для остальных устройств rollout по-прежнему выполнять поэтапно.
+Rollout выполнять поэтапно: OpenWrt 24.x и 25.x проверяются как отдельные группы.
 
 ## Единая установка HOME NET
 
