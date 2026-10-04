@@ -1,0 +1,92 @@
+#!/bin/sh
+# HOME NET Cudy
+# Country lookup with bounded provider fallback
+# Version: 1.4.3
+
+IFACE="${1:-}"
+TAG="podkop-country"
+LOG_DIR="${PODKOP_COUNTRY_LOG_DIR:-/tmp/podkop-service-health/country-provider-log}"
+LOG_INTERVAL="${PODKOP_COUNTRY_LOG_INTERVAL:-3600}"
+CURL_BIN="${PODKOP_COUNTRY_CURL:-curl}"
+
+log_once() {
+    key="$1"
+    shift
+    now="$(date +%s)"
+    mkdir -p "$LOG_DIR"
+    marker="$LOG_DIR/$key"
+    last=0
+    [ -r "$marker" ] && last="$(cat "$marker" 2>/dev/null || echo 0)"
+    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+    if [ $((now - last)) -ge "$LOG_INTERVAL" ]; then
+        logger -t "$TAG" "$*"
+        printf '%s\n' "$now" > "$marker.tmp.$$"
+        mv "$marker.tmp.$$" "$marker"
+    fi
+}
+
+fetch_body() {
+    url="$1"
+    if [ -n "$IFACE" ]; then
+        "$CURL_BIN" -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS "$url" 2>/dev/null
+    else
+        "$CURL_BIN" -4 --connect-timeout 5 --max-time 10 -fsS "$url" 2>/dev/null
+    fi
+}
+
+valid_country() {
+    case "$1" in
+        [A-Z][A-Z]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+lookup_provider() {
+    provider="$1"
+    url="$2"
+    format="$3"
+
+    body="$(fetch_body "$url")" || {
+        log_once "failed-$provider" "country provider $provider failed"
+        return 1
+    }
+
+    case "$format" in
+        plain) country="$(printf '%s' "$body" | tr -d '\r\n')" ;;
+        json)
+            case "$body" in
+                *'"error"'*) country="" ;;
+                *) country="$(printf '%s' "$body" | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([A-Z][A-Z]\)".*/\1/p')" ;;
+            esac
+            ;;
+        *) return 1 ;;
+    esac
+
+    if ! valid_country "$country"; then
+        log_once "failed-$provider" "country provider $provider failed"
+        return 1
+    fi
+
+    COUNTRY_RESULT="$country"
+    return 0
+}
+
+COUNTRY_RESULT=""
+if lookup_provider ipinfo https://ipinfo.io/country plain; then
+    printf '%s\n' "$COUNTRY_RESULT"
+    exit 0
+fi
+
+if lookup_provider ipapi https://ipapi.co/country plain; then
+    log_once used-ipapi "fallback provider ipapi used"
+    printf '%s\n' "$COUNTRY_RESULT"
+    exit 0
+fi
+
+if lookup_provider country-is https://api.country.is/ json; then
+    log_once used-country-is "fallback provider country-is used"
+    printf '%s\n' "$COUNTRY_RESULT"
+    exit 0
+fi
+
+exit 1

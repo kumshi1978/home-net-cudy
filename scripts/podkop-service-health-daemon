@@ -1,13 +1,14 @@
 #!/bin/sh
 # HOME NET Cudy
 # Фоновый монитор состояния Podkop / sing-box / AmneziaWG
-# Версия: 1.4.2
+# Версия: 1.4.3
 #
 # Генерирует состояние системы и передаёт обновление в event pipeline.
 
 CONF="/etc/podkop-service-check.conf"
 CHECK="/usr/bin/podkop-service-check"
 EVENT_RUNNER="/usr/bin/podkop-event-runner"
+COUNTRY_LOOKUP="${PODKOP_COUNTRY_LOOKUP:-/usr/bin/podkop-country-lookup}"
 
 TAG="podkop-service-health"
 LOG_DIR="/tmp/podkop-service-health"
@@ -32,7 +33,7 @@ rotate_logs() {
 }
 
 get_country() {
-    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null | tr -d '\r\n'
+    "$COUNTRY_LOOKUP" "$1" 2>/dev/null
 }
 
 get_ip() {
@@ -44,7 +45,7 @@ get_wan_ip() {
 }
 
 get_direct_country() {
-    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ipinfo.io/country 2>/dev/null | tr -d '\r\n'
+    "$COUNTRY_LOOKUP" 2>/dev/null
 }
 
 check_fakeip() { /usr/bin/podkop-fakeip-check >/dev/null 2>&1; }
