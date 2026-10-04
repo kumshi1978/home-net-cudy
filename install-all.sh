@@ -44,7 +44,37 @@ fetch() {
 reject_disruptive_actions() {
     payload="$1"
     label="$2"
-    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$payload"; then
+    # This is intentionally a small lexical guard for our own release scripts,
+    # not a general shell parser. Ignore comments and quoted diagnostic text,
+    # then require a disruptive command to appear in command position.
+    if awk '
+        BEGIN { quote = "" }
+        {
+            output = ""
+            escaped = 0
+            for (i = 1; i <= length($0); i++) {
+                char = substr($0, i, 1)
+                previous = (i > 1) ? substr($0, i - 1, 1) : ""
+
+                if (quote == "single") {
+                    if (char == sprintf("%c", 39)) quote = ""
+                    continue
+                }
+                if (quote == "double") {
+                    if (escaped) { escaped = 0; continue }
+                    if (char == "\\") { escaped = 1; continue }
+                    if (char == "\"") quote = ""
+                    continue
+                }
+
+                if (char == "#" && (i == 1 || previous ~ /[[:space:];&|()]/)) break
+                if (char == sprintf("%c", 39)) { quote = "single"; output = output " "; continue }
+                if (char == "\"") { quote = "double"; output = output " "; continue }
+                output = output char
+            }
+            print output
+        }
+    ' "$payload" | grep -Eq '(^|[;&|][;&|]?)[[:space:]]*((/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)([[:space:];&|]|$)|reboot([[:space:];&|]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot([[:space:];&|]|$)|shutdown[[:space:]].*-r([[:space:];&|]|$))'; then
         fail "$label contains a forbidden network restart or reboot"
     fi
 }
@@ -170,6 +200,12 @@ write_bootstrap_state() {
     chmod 0600 "$state_tmp"
     mv "$state_tmp" "$HOME_NET_UPDATE_STATE"
 }
+
+if [ "${1:-}" = "--scan-payload" ]; then
+    [ -n "${2:-}" ] || fail "--scan-payload requires a file"
+    reject_disruptive_actions "$2" "${3:-payload}"
+    exit 0
+fi
 
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"

@@ -107,6 +107,15 @@ state_value() {
     sed -n "s/^$1='\([^']*\)'$/\1/p" "$TARGET/home-net-update.state"
 }
 
+scan_payload() {
+    payload="$1"
+    set +e
+    HOME_NET_OPENWRT_RELEASE="$TARGET/openwrt_release" \
+        sh "$INSTALLER" --scan-payload "$payload" test-payload > "$TMP/scan-output" 2>&1
+    SCAN_RC=$?
+    set -e
+}
+
 write_monitoring_installer
 
 cat > "$PAYLOADS/home-net-update" <<'EOF_UPDATER'
@@ -230,6 +239,45 @@ run_installer
 [ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
 grep -Fqx "SENTINEL='preserve-me'" "$TARGET/home-net-update.state"
 echo 'PASS skip_version_record_preserves_state'
+
+cat > "$TARGET/allowed-payload.sh" <<'EOF_ALLOWED'
+#!/bin/sh
+echo "reboot"
+printf '%s\n' "network restart"
+log "automatic network restart or reboot"
+die "reboot is forbidden"
+# reboot
+reason='network restart required'
+EOF_ALLOWED
+scan_payload "$TARGET/allowed-payload.sh"
+[ "$SCAN_RC" -eq 0 ] || { cat "$TMP/scan-output" >&2; exit 1; }
+echo 'PASS diagnostic_text_is_not_disruptive'
+
+scan_payload "$ROOT/scripts/home-net-update"
+[ "$SCAN_RC" -eq 0 ] || { cat "$TMP/scan-output" >&2; exit 1; }
+echo 'PASS real_home_net_update_payload_is_safe'
+
+for disruptive_action in \
+    'reboot' \
+    'reboot &' \
+    '/etc/init.d/network restart' \
+    '/etc/init.d/network reload' \
+    'service network restart' \
+    'service network reload' \
+    'ubus call system reboot' \
+    'shutdown -r now'
+do
+    {
+        printf '%s\n' '#!/bin/sh'
+        printf '%s\n' "$disruptive_action"
+    } > "$TARGET/disruptive-payload.sh"
+    scan_payload "$TARGET/disruptive-payload.sh"
+    [ "$SCAN_RC" -ne 0 ] || {
+        echo "scanner accepted disruptive command: $disruptive_action" >&2
+        exit 1
+    }
+done
+echo 'PASS executable_disruptive_commands_are_rejected'
 
 # The Monitoring installer is executable payload, so every guarded disruptive
 # command form must be rejected before it or the updater installation runs.
