@@ -130,26 +130,27 @@ HOME NET v1.5.1 проверен через единый `install-all.sh` на �
 
 Canary-router: квартирный основной Cudy / OpenWrt 24.10.4 с `AUTO_UPDATE_MODE='apply'`. Остальные роутеры по умолчанию остаются в `check`.
 
-Важно: текущий автоматический updater обновляет только компонент failover. Автоматического обновления всего HOME NET bundle / Monitoring пока нет; это отдельный следующий этап архитектуры.
+Начиная с HOME NET bundle v1.5.2 верхнеуровневый `home-net-update` обновляет
+весь bundle по опубликованному HOME NET Release. Компонентный
+`podkop-awg-update` пока остаётся установленным и продолжает работать по своей
+отдельной политике до специального решения о консолидации.
 
 ## Единый updater
 
-На первом этапе компонентный updater `openwrt-podkop-awg-failover` остаётся источником автоматического обновления failover.
+`home-net-update` реализован как отдельный procd-сервис. Он:
 
-HOME NET bootstrap управляет его политикой (`check`/`apply`) и устанавливает Monitoring.
+1. принимает только published non-draft/non-prerelease `vX.Y.Z` release;
+2. сверяет `VERSION`, release tag и `bundle.conf`;
+3. не выполняет downgrade или повторную установку;
+4. скачивает `install-all.sh` только из точного release tag;
+5. сохраняет backup конфигурации, bundle state и install metadata;
+6. запускает installer с `HOME_NET_BUNDLE_REF="$release_tag"`;
+7. ждёт новый цикл Monitoring и требует полный `STATUS=OK`;
+8. фиксирует новую bundle version только после успешного health;
+9. использует lock, startup delay и deterministic jitter;
+10. разрешает `apply` только при явной роли canary.
 
-На следующем этапе можно добавить верхнеуровневый `home-net-update`, который будет обновлять не отдельный файл, а весь HOME NET bundle по опубликованному stable HOME NET Release/manifest.
-
-Такой updater должен:
-
-1. принимать только published non-draft/non-prerelease release;
-2. проверять bundle manifest;
-3. не выполнять downgrade;
-4. создавать backup перед каждым компонентом;
-5. применять компоненты в фиксированном порядке;
-6. проверять health после каждого шага;
-7. прекращать rollout при ошибке;
-8. поддерживать canary policy и jitter.
+Подробности и команды: `docs/HOME_NET_UPDATE.md`.
 
 ## Порядок компонентов
 
@@ -180,19 +181,19 @@ Installer работает поверх уже существующей лока
 
 ```sh
 wget -qO /tmp/home-net-install-all.sh \
-https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.1/install-all.sh
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.2/install-all.sh
 
-HOME_NET_BUNDLE_REF=v1.5.1 \
+HOME_NET_BUNDLE_REF=v1.5.2 \
 HOME_NET_AUTO_UPDATE_MODE=check \
 sh /tmp/home-net-install-all.sh
 ```
 
-Для canary:
+После установки HOME NET updater остаётся в безопасном режиме:
 
 ```sh
-wget -qO /tmp/home-net-install-all.sh \
-https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh
-HOME_NET_AUTO_UPDATE_MODE=apply sh /tmp/home-net-install-all.sh
+HOME_NET_UPDATE_MODE='check'
+HOME_NET_UPDATE_CANARY='0'
 ```
 
-Перед production rollout bootstrap должен быть привязан к опубликованному HOME NET release/commit, а не динамически устанавливать текущее содержимое component `main`.
+Для canary необходимо явно изменить оба значения. Production bootstrap и updater
+должны быть привязаны к опубликованному HOME NET release tag, а не к `main`.

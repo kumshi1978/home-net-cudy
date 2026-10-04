@@ -7,6 +7,10 @@ TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
 FAILOVER_INSTALL="$TMP_DIR/failover-install.sh"
 MONITORING_INSTALL="$TMP_DIR/monitoring-install.sh"
+HOME_NET_UPDATE_SRC="$TMP_DIR/home-net-update"
+HOME_NET_UPDATE_INIT_SRC="$TMP_DIR/home-net-update.init"
+HOME_NET_UPDATE_CONF_SRC="$TMP_DIR/home-net-update.conf"
+HOME_NET_UPDATE_STATE="/etc/home-net-update.state"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() { rm -rf "$TMP_DIR"; }
@@ -19,7 +23,7 @@ fetch() {
     url="$1"
     out="$2"
     if command -v wget >/dev/null 2>&1; then
-        wget -q -O "$out" "$url" || fail "download failed: $url"
+        wget -q -T 120 -O "$out" "$url" || fail "download failed: $url"
     elif command -v curl >/dev/null 2>&1; then
         curl -fL --connect-timeout 10 --max-time 120 -o "$out" "$url" || fail "download failed: $url"
     else
@@ -30,7 +34,14 @@ fetch() {
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
-AUTO_UPDATE_MODE="${HOME_NET_AUTO_UPDATE_MODE:-$DEFAULT_AUTO_UPDATE_MODE}"
+if [ "${HOME_NET_AUTO_UPDATE_MODE+x}" = "x" ]; then
+    AUTO_UPDATE_MODE="$HOME_NET_AUTO_UPDATE_MODE"
+elif [ -r /etc/podkop-awg-update.conf ]; then
+    AUTO_UPDATE_MODE="$(sed -n "s/^AUTO_UPDATE_MODE='\([^']*\)'$/\1/p" /etc/podkop-awg-update.conf | tail -n 1)"
+    [ -n "$AUTO_UPDATE_MODE" ] || AUTO_UPDATE_MODE="$DEFAULT_AUTO_UPDATE_MODE"
+else
+    AUTO_UPDATE_MODE="$DEFAULT_AUTO_UPDATE_MODE"
+fi
 case "$AUTO_UPDATE_MODE" in check|apply) ;; *) fail "HOME_NET_AUTO_UPDATE_MODE must be check or apply" ;; esac
 
 printf 'HOME NET bundle %s\n' "$HOME_NET_BUNDLE_VERSION"
@@ -38,12 +49,20 @@ printf 'Failover %s, Monitoring %s, auto-update %s\n' "$FAILOVER_VERSION" "$MONI
 
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
+HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/scripts/home-net-update"
+HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/init.d/home-net-update"
+HOME_NET_UPDATE_CONF_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/configs/home-net-update.conf.example"
 
 fetch "$FAILOVER_URL" "$FAILOVER_INSTALL"
 fetch "$MONITORING_URL" "$MONITORING_INSTALL"
+fetch "$HOME_NET_UPDATE_URL" "$HOME_NET_UPDATE_SRC"
+fetch "$HOME_NET_UPDATE_INIT_URL" "$HOME_NET_UPDATE_INIT_SRC"
+fetch "$HOME_NET_UPDATE_CONF_URL" "$HOME_NET_UPDATE_CONF_SRC"
 
 sh -n "$FAILOVER_INSTALL" || fail "failover installer syntax check failed"
 sh -n "$MONITORING_INSTALL" || fail "monitoring installer syntax check failed"
+sh -n "$HOME_NET_UPDATE_SRC" || fail "HOME NET updater syntax check failed"
+sh -n "$HOME_NET_UPDATE_INIT_SRC" || fail "HOME NET updater init syntax check failed"
 
 grep -Fq "SCRIPT_VERSION=\"$FAILOVER_VERSION\"" "$FAILOVER_INSTALL" || fail "failover installer version mismatch"
 
@@ -59,6 +78,28 @@ fi
 printf '\n===== INSTALL MONITORING =====\n'
 sh "$MONITORING_INSTALL"
 
+printf '\n===== INSTALL HOME NET UPDATER =====\n'
+UPDATER_BACKUP="/root/home-net-updater-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$UPDATER_BACKUP"
+for FILE in /usr/bin/home-net-update /etc/init.d/home-net-update /etc/home-net-update.conf "$HOME_NET_UPDATE_STATE"
+do
+    [ -f "$FILE" ] && cp -p "$FILE" "$UPDATER_BACKUP/"
+done
+
+cp "$HOME_NET_UPDATE_SRC" /usr/bin/home-net-update
+cp "$HOME_NET_UPDATE_INIT_SRC" /etc/init.d/home-net-update
+chmod 0755 /usr/bin/home-net-update /etc/init.d/home-net-update
+
+if [ ! -f /etc/home-net-update.conf ]; then
+    cp "$HOME_NET_UPDATE_CONF_SRC" /etc/home-net-update.conf
+    chmod 0600 /etc/home-net-update.conf
+fi
+
+/etc/init.d/home-net-update enable
+if [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" != "1" ]; then
+    /etc/init.d/home-net-update restart
+fi
+
 printf '\n===== FINAL CHECK =====\n'
 grep '^INSTALLED_VERSION=' /etc/podkop-awg-failover.conf 2>/dev/null || true
 uci -q get podkop.main.interface 2>/dev/null || true
@@ -66,5 +107,17 @@ pgrep -af '/usr/bin/podkop-awg-update' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-awg-failover' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-health' 2>/dev/null || true
 cat /tmp/podkop-service-health/state 2>/dev/null || true
+
+if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
+    STATE_TMP="$HOME_NET_UPDATE_STATE.tmp.$$"
+    {
+        printf "INSTALLED_BUNDLE_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
+        printf "INSTALLED_BUNDLE_TAG='%s'\n" "$BUNDLE_REF"
+        printf "INSTALLED_AT='%s'\n" "$(date '+%F %T')"
+        printf "INSTALL_SOURCE='install-all'\n"
+    } > "$STATE_TMP"
+    chmod 0600 "$STATE_TMP"
+    mv "$STATE_TMP" "$HOME_NET_UPDATE_STATE"
+fi
 
 printf '\nHOME NET bundle installation complete.\n'

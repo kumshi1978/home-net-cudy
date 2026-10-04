@@ -1,0 +1,356 @@
+#!/bin/sh
+
+# Stable-release updater for the complete HOME NET bundle.
+CONF=${HOME_NET_UPDATE_CONF:-/etc/home-net-update.conf}
+INSTALLED_STATE=${HOME_NET_UPDATE_STATE_FILE:-/etc/home-net-update.state}
+RUNTIME_DIR=${HOME_NET_UPDATE_RUNTIME_DIR:-/tmp/home-net-update}
+LOCK_DIR=${HOME_NET_UPDATE_LOCK_DIR:-/var/run/home-net-update.lock}
+HEALTH_STATE=${HOME_NET_UPDATE_HEALTH_STATE:-/tmp/podkop-service-health/state}
+BACKUP_ROOT=${HOME_NET_UPDATE_BACKUP_ROOT:-/root}
+UPDATED_MARKER="$RUNTIME_DIR/updated"
+TAG=home-net-update
+REPO=${HOME_NET_UPDATE_REPO:-kumshi1978/home-net-cudy}
+API_URL=${HOME_NET_UPDATE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
+RAW_URL=${HOME_NET_UPDATE_RAW_URL:-https://raw.githubusercontent.com/$REPO}
+
+[ -r "$CONF" ] && . "$CONF"
+
+MODE=${HOME_NET_UPDATE_MODE:-check}
+CANARY=${HOME_NET_UPDATE_CANARY:-0}
+INTERVAL=${HOME_NET_UPDATE_INTERVAL:-86400}
+JITTER=${HOME_NET_UPDATE_JITTER:-21600}
+STARTUP_DELAY=${HOME_NET_UPDATE_STARTUP_DELAY:-300}
+COMMAND_TIMEOUT=${HOME_NET_UPDATE_COMMAND_TIMEOUT:-120}
+HEALTH_TIMEOUT=${HOME_NET_UPDATE_HEALTH_TIMEOUT:-600}
+HEALTH_RETRY_INTERVAL=${HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL:-10}
+UPDATED=0
+
+log() { logger -t "$TAG" "$*" 2>/dev/null || true; printf '%s\n' "$*"; }
+die() { log "ERROR: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+bounded_run() {
+    limit="$1"
+    shift
+    "$@" &
+    cmd_pid=$!
+    elapsed=0
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        if [ "$elapsed" -ge "$limit" ]; then
+            kill "$cmd_pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$cmd_pid" 2>/dev/null || true
+            wait "$cmd_pid" 2>/dev/null || true
+            return 124
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    wait "$cmd_pid"
+}
+
+release_lock() {
+    rm -f "$LOCK_DIR/pid"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    trap - EXIT INT TERM
+}
+
+acquire_lock() {
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        printf '%s\n' "$$" > "$LOCK_DIR/pid"
+        trap release_lock EXIT INT TERM
+        return 0
+    fi
+
+    lock_pid=""
+    [ -r "$LOCK_DIR/pid" ] && read lock_pid < "$LOCK_DIR/pid"
+    if [ -z "$lock_pid" ] || ! kill -0 "$lock_pid" 2>/dev/null; then
+        log "recovering stale update lock"
+        rm -f "$LOCK_DIR/pid"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        mkdir "$LOCK_DIR" 2>/dev/null || return 1
+        printf '%s\n' "$$" > "$LOCK_DIR/pid"
+        trap release_lock EXIT INT TERM
+        return 0
+    fi
+    return 1
+}
+
+valid_version() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
+valid_uint() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+
+version_gt() {
+    version_a="$1"
+    version_b="$2"
+    old_ifs="$IFS"
+    IFS=.
+    set -- $version_a
+    a1=$1 a2=$2 a3=$3
+    set -- $version_b
+    b1=$1 b2=$2 b3=$3
+    IFS="$old_ifs"
+    [ "$a1" -gt "$b1" ] && return 0
+    [ "$a1" -lt "$b1" ] && return 1
+    [ "$a2" -gt "$b2" ] && return 0
+    [ "$a2" -lt "$b2" ] && return 1
+    [ "$a3" -gt "$b3" ]
+}
+
+state_value() {
+    key="$1"
+    file="$2"
+    [ -r "$file" ] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -n 1 | sed "s/^'//; s/'$//"
+}
+
+installed_version() {
+    current="$(state_value INSTALLED_BUNDLE_VERSION "$INSTALLED_STATE")"
+    [ -n "$current" ] || current=0.0.0
+    valid_version "$current" || die "invalid installed bundle version: $current"
+}
+
+fetch_release() {
+    mkdir -p "$RUNTIME_DIR"
+    release_json="$RUNTIME_DIR/release.json"
+    bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL \
+        --connect-timeout 10 --max-time "$COMMAND_TIMEOUT" \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        "$API_URL" -o "$release_json" || die "cannot fetch stable release metadata"
+
+    compact="$(tr -d '\r\n' < "$release_json")"
+    printf '%s\n' "$compact" | grep -Eq '"draft"[[:space:]]*:[[:space:]]*false' || die "latest release is draft or metadata is invalid"
+    printf '%s\n' "$compact" | grep -Eq '"prerelease"[[:space:]]*:[[:space:]]*false' || die "latest release is prerelease or metadata is invalid"
+    release_tag="$(printf '%s\n' "$compact" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p')"
+    [ -n "$release_tag" ] || die "stable release tag is missing or invalid"
+    release_version=${release_tag#v}
+    valid_version "$release_version" || die "invalid stable release version: $release_version"
+}
+
+check_release() {
+    fetch_release
+    installed_version
+    if version_gt "$release_version" "$current"; then
+        log "stable HOME NET update available: $current -> $release_version ($release_tag)"
+        return 10
+    fi
+    if version_gt "$current" "$release_version"; then
+        log "installed HOME NET bundle $current is newer than latest stable $release_version; no downgrade"
+    else
+        log "installed HOME NET bundle $current is the latest stable release"
+    fi
+    return 0
+}
+
+download_release_payload() {
+    work="$RUNTIME_DIR/$release_tag"
+    mkdir -p "$work"
+    version_file="$work/VERSION"
+    bundle_file="$work/bundle.conf"
+    installer="$work/install-all.sh"
+
+    for payload in VERSION bundle.conf install-all.sh; do
+        bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL \
+            --connect-timeout 10 --max-time "$COMMAND_TIMEOUT" \
+            "$RAW_URL/$release_tag/$payload" -o "$work/$payload" \
+            || die "cannot download $payload from $release_tag"
+    done
+
+    downloaded_version="$(tr -d '\r\n' < "$version_file")"
+    [ "$downloaded_version" = "$release_version" ] || die "release VERSION does not match tag"
+    grep -Fq "HOME_NET_BUNDLE_VERSION='$release_version'" "$bundle_file" || die "bundle.conf version does not match release"
+    sh -n "$installer" || die "downloaded install-all.sh failed syntax validation"
+}
+
+create_backup() {
+    backup="$BACKUP_ROOT/home-net-update-backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup"
+    cp -p "$release_json" "$version_file" "$bundle_file" "$installer" "$backup/"
+    [ -r "$CONF" ] && cp -p "$CONF" "$backup/home-net-update.conf"
+    [ -r "$INSTALLED_STATE" ] && cp -p "$INSTALLED_STATE" "$backup/home-net-update.state"
+    {
+        printf "FROM_VERSION='%s'\n" "$current"
+        printf "TARGET_VERSION='%s'\n" "$release_version"
+        printf "TARGET_TAG='%s'\n" "$release_tag"
+        printf "STARTED_AT='%s'\n" "$(date '+%F %T')"
+    } > "$backup/install-metadata"
+    log "pre-apply backup created: $backup"
+}
+
+health_value() {
+    key="$1"
+    [ -r "$HEALTH_STATE" ] || return 0
+    sed -n "s/^${key}=//p" "$HEALTH_STATE" | tail -n 1
+}
+
+wait_for_healthy_cycle() {
+    before_last="$1"
+    before_started="$2"
+    elapsed=0
+
+    while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
+        last_check="$(health_value LAST_CHECK)"
+        check_started="$(health_value CHECK_STARTED)"
+        fresh=0
+        [ -n "$last_check" ] && [ "$last_check" != "$before_last" ] && fresh=1
+        if [ "$fresh" -eq 0 ] && [ -n "$last_check" ] && \
+           [ "$check_started" != "$before_started" ] && [ "$last_check" = "$check_started" ]; then
+            fresh=1
+        fi
+
+        if [ "$fresh" -eq 1 ]; then
+            for required in \
+                STATUS=OK \
+                PODKOP=RUNNING \
+                SING_BOX=RUNNING \
+                FAKEIP=OK \
+                SERVICE_CHECK=OK
+            do
+                key=${required%%=*}
+                expected=${required#*=}
+                actual="$(health_value "$key")"
+                [ "$actual" = "$expected" ] || {
+                    log "post-update health failed: $key=${actual:-missing}, expected $expected"
+                    return 1
+                }
+            done
+            log "post-update Monitoring cycle is healthy"
+            return 0
+        fi
+
+        sleep "$HEALTH_RETRY_INTERVAL"
+        elapsed=$((elapsed + HEALTH_RETRY_INTERVAL))
+    done
+
+    log "post-update health timed out after ${HEALTH_TIMEOUT}s"
+    return 1
+}
+
+write_installed_state() {
+    state_dir=${INSTALLED_STATE%/*}
+    [ "$state_dir" = "$INSTALLED_STATE" ] || mkdir -p "$state_dir"
+    state_tmp="$INSTALLED_STATE.tmp.$$"
+    {
+        printf "INSTALLED_BUNDLE_VERSION='%s'\n" "$release_version"
+        printf "INSTALLED_BUNDLE_TAG='%s'\n" "$release_tag"
+        printf "INSTALLED_AT='%s'\n" "$(date '+%F %T')"
+        printf "INSTALL_SOURCE='stable-release'\n"
+    } > "$state_tmp"
+    chmod 0600 "$state_tmp"
+    mv "$state_tmp" "$INSTALLED_STATE"
+}
+
+apply_release() {
+    [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
+
+    check_release
+    check_rc=$?
+    [ "$check_rc" -eq 10 ] || return "$check_rc"
+
+    download_release_payload
+    create_backup
+    before_last="$(health_value LAST_CHECK)"
+    before_started="$(health_value CHECK_STARTED)"
+
+    log "applying stable HOME NET bundle $release_tag"
+    if ! HOME_NET_BUNDLE_REF="$release_tag" \
+         HOME_NET_UPDATE_IN_PROGRESS=1 \
+         HOME_NET_SKIP_VERSION_RECORD=1 \
+         sh "$installer"
+    then
+        die "bundle installer failed; installed version was not changed; backup: $backup"
+    fi
+
+    if ! wait_for_healthy_cycle "$before_last" "$before_started"; then
+        die "bundle installed but post-update health failed; installed version was not changed; backup: $backup"
+    fi
+
+    write_installed_state
+    UPDATED=1
+    : > "$UPDATED_MARKER"
+    log "stable HOME NET bundle $release_tag applied and recorded successfully"
+}
+
+cohort_delay() {
+    case "$JITTER" in ''|*[!0-9]*) printf '0'; return ;; esac
+    [ "$JITTER" -gt 0 ] || { printf '0'; return; }
+
+    if [ -r /etc/machine-id ]; then
+        read seed < /etc/machine-id
+        prefix="$(printf '%.8s' "$seed")"
+        case "$prefix" in ''|*[!0-9A-Fa-f]*) prefix='' ;; esac
+        if [ -n "$prefix" ]; then
+            number=$((0x$prefix))
+            printf '%s' "$((number % JITTER))"
+            return
+        fi
+    fi
+
+    if [ -r /sys/class/net/eth0/address ]; then
+        read mac < /sys/class/net/eth0/address
+        old_ifs="$IFS"
+        IFS=:
+        set -- $mac
+        IFS="$old_ifs"
+        if [ "$#" -ge 4 ]; then
+            prefix="$1$2$3$4"
+            case "$prefix" in ''|*[!0-9A-Fa-f]*) prefix='' ;; esac
+            if [ -n "$prefix" ]; then
+                number=$((0x$prefix))
+                printf '%s' "$((number % JITTER))"
+                return
+            fi
+        fi
+    fi
+
+    printf '0'
+}
+
+run_once() {
+    acquire_lock || { log "another HOME NET update is already running; skipped"; return 0; }
+    case "$1" in
+        check) check_release; rc=$?; [ "$rc" -eq 10 ] && rc=0 ;;
+        apply) apply_release; rc=$? ;;
+        *) rc=2 ;;
+    esac
+    release_lock
+    return "$rc"
+}
+
+daemon() {
+    case "$MODE" in check|apply) ;; *) die "HOME_NET_UPDATE_MODE must be check or apply" ;; esac
+    [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
+
+    sleep "$STARTUP_DELAY"
+    delay="$(cohort_delay)"
+    log "automatic HOME NET mode=$MODE canary=$CANARY fleet_delay=${delay}s interval=${INTERVAL}s"
+    sleep "$delay"
+    while true; do
+        rm -f "$UPDATED_MARKER"
+        if ! "$0" "$MODE"; then
+            log "automatic HOME NET $MODE run failed; next attempt follows the normal interval"
+        fi
+        [ -f "$UPDATED_MARKER" ] && exit 0
+        sleep "$INTERVAL"
+    done
+}
+
+for tool in curl grep sed tr logger; do need "$tool"; done
+case "$CANARY" in 0|1) ;; *) die "HOME_NET_UPDATE_CANARY must be 0 or 1" ;; esac
+for number in "$INTERVAL" "$JITTER" "$STARTUP_DELAY" "$COMMAND_TIMEOUT" "$HEALTH_TIMEOUT" "$HEALTH_RETRY_INTERVAL"; do
+    valid_uint "$number" || die "update timing values must be non-negative integers"
+done
+[ "$COMMAND_TIMEOUT" -gt 0 ] || die "HOME_NET_UPDATE_COMMAND_TIMEOUT must be greater than zero"
+[ "$HEALTH_TIMEOUT" -gt 0 ] || die "HOME_NET_UPDATE_HEALTH_TIMEOUT must be greater than zero"
+[ "$HEALTH_RETRY_INTERVAL" -gt 0 ] || die "HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL must be greater than zero"
+case "${1:-}" in
+    check) run_once check ;;
+    apply) run_once apply ;;
+    daemon) daemon ;;
+    *) printf 'Usage: %s {check|apply|daemon}\n' "$0" >&2; exit 2 ;;
+esac

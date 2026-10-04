@@ -23,12 +23,16 @@
 
 ## Текущая версия
 
-**v1.5.1 — HOME NET unified bundle.**
+**v1.5.2 — HOME NET unified bundle с верхнеуровневым stable-release updater.**
 
 Состав bundle:
 
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
 - HOME NET Monitoring: `v1.4.2`.
+
+Bundle устанавливает `/usr/bin/home-net-update`, который проверяет только
+опубликованные stable GitHub Releases `home-net-cudy` и обновляет весь совместимый
+набор из `bundle.conf`. Компонентный `podkop-awg-update` пока сохраняется отдельно.
 
 Аппаратная проверка v1.5.1 завершена на обеих поддерживаемых ветках OpenWrt:
 
@@ -45,24 +49,27 @@
 
 ## Единая установка HOME NET
 
-Для обычного роутера безопасный режим автообновления по умолчанию — `check`. Для стабильной установки используйте опубликованный release tag:
+Для обычного роутера безопасный режим HOME NET updater по умолчанию — `check`.
+Для стабильной установки используйте опубликованный release tag:
 
 ```sh
 wget -qO /tmp/home-net-install-all.sh \
-https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.1/install-all.sh
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.2/install-all.sh
 
-HOME_NET_BUNDLE_REF=v1.5.1 \
+HOME_NET_BUNDLE_REF=v1.5.2 \
 HOME_NET_AUTO_UPDATE_MODE=check \
 sh /tmp/home-net-install-all.sh
 ```
 
-Для canary-router можно явно включить `apply`:
+После установки проверить HOME NET release без применения:
 
 ```sh
-wget -qO /tmp/home-net-install-all.sh \
-https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install-all.sh
-HOME_NET_AUTO_UPDATE_MODE=apply sh /tmp/home-net-install-all.sh
+/usr/bin/home-net-update check
 ```
+
+Автоматический `apply` разрешается только на заранее выбранном canary-router и
+требует одновременно `HOME_NET_UPDATE_MODE='apply'` и
+`HOME_NET_UPDATE_CANARY='1'` в `/etc/home-net-update.conf`.
 
 Manifest `bundle.conf` фиксирует совместимую комбинацию компонентных версий. Failover и Monitoring остаются отдельными компонентами и могут версионироваться независимо.
 
@@ -80,4 +87,5 @@ wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/instal
 
 - `docs/INSTALL.md` — Monitoring;
 - `docs/UNIFIED_INSTALL.md` — архитектура общего bundle;
+- `docs/HOME_NET_UPDATE.md` — check/apply/canary, backup, health и rollback;
 - failover auto-update: `openwrt-podkop-awg-failover/docs/AUTO_UPDATE.md`.
