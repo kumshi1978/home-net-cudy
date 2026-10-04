@@ -303,7 +303,13 @@ fi
 
 "$HOME_NET_UPDATE_INIT" enable
 if [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" != "1" ]; then
-    "$HOME_NET_UPDATE_INIT" restart
+    # On first install the service is enabled but not registered in procd yet.
+    # Calling restart here would try to delete a missing service before start.
+    if "$HOME_NET_UPDATE_INIT" running; then
+        "$HOME_NET_UPDATE_INIT" restart
+    else
+        "$HOME_NET_UPDATE_INIT" start
+    fi
 fi
 
 printf '\n===== FINAL CHECK =====\n'

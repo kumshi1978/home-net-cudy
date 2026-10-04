@@ -123,10 +123,28 @@ cat > "$PAYLOADS/home-net-update" <<'EOF_UPDATER'
 echo new-updater
 EOF_UPDATER
 
-cat > "$PAYLOADS/home-net-update.init" <<'EOF_INIT'
+write_updater_init() {
+    cat > "$PAYLOADS/home-net-update.init" <<'EOF_INIT'
 #!/bin/sh
-exit 0
+action="${1:-}"
+printf '%s\n' "$action" >> "$MOCK_INIT_LOG"
+case "$action" in
+    enable) exit 0 ;;
+    running) [ -f "$MOCK_INIT_STATE" ] ;;
+    start) : > "$MOCK_INIT_STATE"; exit 0 ;;
+    restart)
+        if [ ! -f "$MOCK_INIT_STATE" ]; then
+            echo 'Command failed: Not found' >&2
+        fi
+        : > "$MOCK_INIT_STATE"
+        exit 0
+        ;;
+    *) exit 2 ;;
+esac
 EOF_INIT
+}
+
+write_updater_init
 
 printf "HOME_NET_UPDATE_MODE='check'\n" > "$PAYLOADS/home-net-update.conf"
 printf "DISTRIB_ID='OpenWrt'\n" > "$TARGET/openwrt_release"
@@ -143,7 +161,7 @@ run_installer() {
     MOCK_PAYLOADS="$PAYLOADS" \
     MOCK_HEALTH_MODE="$TEST_HEALTH_MODE" \
     HOME_NET_BUNDLE_REF='test-ref' \
-    HOME_NET_UPDATE_IN_PROGRESS='1' \
+    HOME_NET_UPDATE_IN_PROGRESS="$TEST_UPDATE_IN_PROGRESS" \
     HOME_NET_SKIP_VERSION_RECORD="$TEST_SKIP_VERSION_RECORD" \
     HOME_NET_OPENWRT_RELEASE="$TARGET/openwrt_release" \
     HOME_NET_FAILOVER_CONF="$TARGET/failover.conf" \
@@ -156,6 +174,8 @@ run_installer() {
     HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT='1' \
     HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL='1' \
     HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES='1' \
+    MOCK_INIT_LOG="$TMP/init-actions" \
+    MOCK_INIT_STATE="$TMP/init-running" \
     sh "$INSTALLER" > "$TMP/output" 2>&1
     RUN_RC=$?
     set -e
@@ -178,11 +198,54 @@ chmod +x "$BIN/cp"
 
 TEST_SKIP_VERSION_RECORD=1
 TEST_HEALTH_MODE=stale
+TEST_UPDATE_IN_PROGRESS=1
+: > "$TMP/init-actions"
+rm -f "$TMP/init-running"
 run_installer
 [ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
 grep -Fq 'new-updater' "$TARGET/home-net-update"
 [ -x "$TARGET/home-net-update" ]
 echo 'PASS atomic_self_update'
+
+# Reproduce the old first-install lifecycle exactly: restart performs a stop
+# against an unregistered procd service, prints the hardware-only message, and
+# then starts successfully. The fixed installer must select start instead.
+: > "$TMP/init-actions"
+rm -f "$TMP/init-running"
+MOCK_INIT_LOG="$TMP/init-actions" MOCK_INIT_STATE="$TMP/init-running" \
+    sh "$PAYLOADS/home-net-update.init" enable > "$TMP/old-lifecycle" 2>&1
+MOCK_INIT_LOG="$TMP/init-actions" MOCK_INIT_STATE="$TMP/init-running" \
+    sh "$PAYLOADS/home-net-update.init" restart >> "$TMP/old-lifecycle" 2>&1
+grep -Fq 'Command failed: Not found' "$TMP/old-lifecycle"
+echo 'PASS old_first_install_restart_reproduces_message'
+
+: > "$TMP/init-actions"
+rm -f "$TMP/init-running" "$TARGET/init.d/home-net-update"
+TEST_SKIP_VERSION_RECORD=1
+TEST_HEALTH_MODE=stale
+TEST_UPDATE_IN_PROGRESS=0
+write_updater_init
+run_installer
+[ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
+[ "$(sed -n '1p' "$TMP/init-actions")" = enable ]
+[ "$(sed -n '2p' "$TMP/init-actions")" = running ]
+[ "$(sed -n '3p' "$TMP/init-actions")" = start ]
+[ "$(wc -l < "$TMP/init-actions" | tr -d ' ')" -eq 3 ]
+! grep -Fq 'Command failed: Not found' "$TMP/output"
+echo 'PASS first_install_uses_enable_running_start'
+
+: > "$TMP/init-actions"
+: > "$TMP/init-running"
+TEST_UPDATE_IN_PROGRESS=0
+run_installer
+[ "$RUN_RC" -eq 0 ] || { cat "$TMP/output" >&2; exit 1; }
+[ "$(sed -n '1p' "$TMP/init-actions")" = enable ]
+[ "$(sed -n '2p' "$TMP/init-actions")" = running ]
+[ "$(sed -n '3p' "$TMP/init-actions")" = restart ]
+[ "$(wc -l < "$TMP/init-actions" | tr -d ' ')" -eq 3 ]
+echo 'PASS running_upgrade_uses_enable_running_restart'
+
+TEST_UPDATE_IN_PROGRESS=1
 
 run_bootstrap_case() {
     expected_rc="$1"
