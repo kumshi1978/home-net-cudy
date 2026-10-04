@@ -16,7 +16,7 @@ Bootstrap-установщик:
 
 - проверяет, что система — OpenWrt;
 - скачивает архив строго по релизному commit `4b407abcaa407f8b23c1c3b529466790fd2b242e`;
-- проверяет, что `VERSION=1.4.1`;
+- проверяет, что `VERSION=1.4.2`;
 - распаковывает архив во временный каталог `/tmp`;
 - запускает встроенный `install/install.sh`;
 - удаляет временные файлы после завершения.
@@ -93,14 +93,16 @@ ip rule show | grep -E 'lookup[[:space:]]+podkop([[:space:]]|$)'
 
 ## Совместимость и аппаратная проверка
 
-v1.4.2 аппаратно протестирована на:
+Monitoring v1.4.2 аппаратно проверен на Cudy / OpenWrt 25.12.5 с BusyBox ash, Podkop + sing-box и AmneziaWG `awg_main` / `awg_backup`.
 
-- Cudy;
-- OpenWrt 24.10.4;
-- BusyBox ash;
-- Podkop + sing-box;
-- AmneziaWG `awg_main` / `awg_backup`.
+Подтверждены:
 
-На OpenWrt 24.10.4 подтверждено, что установка monitoring не перезапускает failover и не меняет активный VPN-интерфейс.
+- штатный `STATUS=OK`;
+- `STATUS=UNKNOWN` при пустом обязательном сетевом результате;
+- `STATUS=FAIL` при критическом локальном отказе;
+- fail-fast без каскада внешних timeout;
+- HTTP 451 как `REACHABLE/HTTP_DENIED`;
+- FakeIP probes без `unifi.ui.com`;
+- installer не меняет Podkop DNS, AmneziaWG или failover.
 
-v1.4.2 аппаратно проверена на Cudy / OpenWrt 25.12.5. Подтверждены состояния OK / UNKNOWN / FAIL, fail-fast при деградации, корректная обработка HTTP 451 и обновлённые FakeIP probes.
+На OpenWrt 24.10.4 ранее аппаратно проверен Monitoring v1.4.1. Monitoring v1.4.2 на 24.10.4 должен пройти отдельный rollout-test перед массовым обновлением этой группы.
