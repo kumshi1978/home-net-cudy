@@ -34,6 +34,11 @@ fetch() {
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
+case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) fail "invalid UPDATE_ACTION_CLASS in bundle.conf" ;; esac
+ACTION_CLASS="${HOME_NET_ACTION_CLASS:-$UPDATE_ACTION_CLASS}"
+[ "$ACTION_CLASS" = "$UPDATE_ACTION_CLASS" ] || fail "HOME_NET_ACTION_CLASS does not match bundle.conf"
+case "${HOME_NET_STAGE_ONLY:-0}" in 0|1) ;; *) fail "HOME_NET_STAGE_ONLY must be 0 or 1" ;; esac
+
 if [ "${HOME_NET_AUTO_UPDATE_MODE+x}" = "x" ]; then
     AUTO_UPDATE_MODE="$HOME_NET_AUTO_UPDATE_MODE"
 elif [ -r /etc/podkop-awg-update.conf ]; then
@@ -45,7 +50,7 @@ fi
 case "$AUTO_UPDATE_MODE" in check|apply) ;; *) fail "HOME_NET_AUTO_UPDATE_MODE must be check or apply" ;; esac
 
 printf 'HOME NET bundle %s\n' "$HOME_NET_BUNDLE_VERSION"
-printf 'Failover %s, Monitoring %s, auto-update %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION" "$AUTO_UPDATE_MODE"
+printf 'Failover %s, Monitoring %s, auto-update %s, action class %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION" "$AUTO_UPDATE_MODE" "$ACTION_CLASS"
 
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
@@ -53,24 +58,42 @@ HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/
 HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/init.d/home-net-update"
 HOME_NET_UPDATE_CONF_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/configs/home-net-update.conf.example"
 
-fetch "$FAILOVER_URL" "$FAILOVER_INSTALL"
 fetch "$MONITORING_URL" "$MONITORING_INSTALL"
 fetch "$HOME_NET_UPDATE_URL" "$HOME_NET_UPDATE_SRC"
 fetch "$HOME_NET_UPDATE_INIT_URL" "$HOME_NET_UPDATE_INIT_SRC"
 fetch "$HOME_NET_UPDATE_CONF_URL" "$HOME_NET_UPDATE_CONF_SRC"
 
-sh -n "$FAILOVER_INSTALL" || fail "failover installer syntax check failed"
 sh -n "$MONITORING_INSTALL" || fail "monitoring installer syntax check failed"
 sh -n "$HOME_NET_UPDATE_SRC" || fail "HOME NET updater syntax check failed"
 sh -n "$HOME_NET_UPDATE_INIT_SRC" || fail "HOME NET updater init syntax check failed"
 
-grep -Fq "SCRIPT_VERSION=\"$FAILOVER_VERSION\"" "$FAILOVER_INSTALL" || fail "failover installer version mismatch"
+INSTALLED_FAILOVER="$(sed -n "s/^INSTALLED_VERSION='\([^']*\)'$/\1/p" /etc/podkop-awg-failover.conf 2>/dev/null | tail -n 1)"
+NEED_FAILOVER=0
+[ "$INSTALLED_FAILOVER" = "$FAILOVER_VERSION" ] || NEED_FAILOVER=1
 
-printf '\n===== INSTALL FAILOVER =====\n'
-UPDATE_SOURCE_REF="v$FAILOVER_VERSION" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
+if [ "$NEED_FAILOVER" = "1" ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ]; then
+    if [ "$ACTION_CLASS" = "SAFE" ] && [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = "1" ]; then
+        fail "SAFE automatic update cannot change the runtime failover version"
+    fi
+    fetch "$FAILOVER_URL" "$FAILOVER_INSTALL"
+    sh -n "$FAILOVER_INSTALL" || fail "failover installer syntax check failed"
+    grep -Fq "SCRIPT_VERSION=\"$FAILOVER_VERSION\"" "$FAILOVER_INSTALL" || fail "failover installer version mismatch"
+    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$FAILOVER_INSTALL"; then
+        fail "failover installer contains a forbidden network restart or reboot"
+    fi
+fi
+
+if [ "${HOME_NET_STAGE_ONLY:-0}" = "1" ]; then
+    printf '\n===== STAGE ONLY: RUNTIME FAILOVER ACTIVATION SKIPPED =====\n'
+elif [ "$NEED_FAILOVER" = "1" ]; then
+    printf '\n===== INSTALL FAILOVER (CONTROLLED) =====\n'
+    UPDATE_SOURCE_REF="v$FAILOVER_VERSION" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
+else
+    printf '\n===== FAILOVER ALREADY AT REQUIRED VERSION =====\n'
+fi
 
 printf '\n===== SET AUTO UPDATE MODE =====\n'
-if [ -f /etc/podkop-awg-update.conf ]; then
+if [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ]; then
     sed -i "s/^AUTO_UPDATE_MODE='[^']*'/AUTO_UPDATE_MODE='$AUTO_UPDATE_MODE'/" /etc/podkop-awg-update.conf
     /etc/init.d/podkop-awg-update restart >/dev/null 2>&1 || true
 fi
@@ -109,11 +132,19 @@ pgrep -af '/usr/bin/podkop-health' 2>/dev/null || true
 cat /tmp/podkop-service-health/state 2>/dev/null || true
 
 if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
+    FINAL_HEALTH_STATUS="$(sed -n 's/^STATUS=//p' /tmp/podkop-service-health/state 2>/dev/null | tail -n 1)"
+    [ -n "$FINAL_HEALTH_STATUS" ] || FINAL_HEALTH_STATUS=UNKNOWN
     STATE_TMP="$HOME_NET_UPDATE_STATE.tmp.$$"
     {
-        printf "INSTALLED_BUNDLE_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
-        printf "INSTALLED_BUNDLE_TAG='%s'\n" "$BUNDLE_REF"
-        printf "INSTALLED_AT='%s'\n" "$(date '+%F %T')"
+        printf "INSTALLED_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
+        printf "ACTIVE_VERSION='%s'\n" "$HOME_NET_BUNDLE_VERSION"
+        printf "UPDATE_STATUS='OK'\n"
+        printf "PENDING_ACTION='none'\n"
+        printf "PENDING_REASON='none'\n"
+        printf "PENDING_VERSION='none'\n"
+        printf "PENDING_BOOT_ID='none'\n"
+        printf "LAST_UPDATE='%s'\n" "$(date '+%F %T')"
+        printf "LAST_HEALTH_STATUS='%s'\n" "$FINAL_HEALTH_STATUS"
         printf "INSTALL_SOURCE='install-all'\n"
     } > "$STATE_TMP"
     chmod 0600 "$STATE_TMP"

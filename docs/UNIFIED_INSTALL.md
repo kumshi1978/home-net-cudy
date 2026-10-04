@@ -150,6 +150,17 @@ Canary-router: квартирный основной Cudy / OpenWrt 24.10.4 с `
 9. использует lock, startup delay и deterministic jitter;
 10. разрешает `apply` только при явной роли canary.
 
+Release manifest также объявляет `UPDATE_ACTION_CLASS`:
+
+- `SAFE` — автоматическая установка и activation после health gate;
+- `CONTROLLED` — preflight, coordination marker, bounded verification;
+- `CRITICAL` — только stage и `PENDING_APPLY`, без автоматического reboot или
+  network restart.
+
+State различает `INSTALLED_VERSION` и `ACTIVE_VERSION`. Поэтому установка файлов
+не означает успешную активацию потенциально disruptive изменения. Полная state
+machine и recovery описаны в `docs/HOME_NET_UPDATE.md`.
+
 Подробности и команды: `docs/HOME_NET_UPDATE.md`.
 
 ## Порядок компонентов

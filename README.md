@@ -65,11 +65,16 @@ sh /tmp/home-net-install-all.sh
 
 ```sh
 /usr/bin/home-net-update check
+/usr/bin/home-net-update status
 ```
 
 Автоматический `apply` разрешается только на заранее выбранном canary-router и
 требует одновременно `HOME_NET_UPDATE_MODE='apply'` и
 `HOME_NET_UPDATE_CANARY='1'` в `/etc/home-net-update.conf`.
+
+Release действия классифицируются как `SAFE`, `CONTROLLED` или `CRITICAL`.
+CRITICAL activation всегда остаётся `PENDING_APPLY`: updater не выполняет
+автоматический reboot или restart/reload сети.
 
 Manifest `bundle.conf` фиксирует совместимую комбинацию компонентных версий. Failover и Monitoring остаются отдельными компонентами и могут версионироваться независимо.
 

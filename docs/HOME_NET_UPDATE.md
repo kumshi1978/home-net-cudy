@@ -18,15 +18,95 @@ channel верхнеуровневый updater не изменяет.
 /etc/home-net-update.state
 ```
 
-`/etc/home-net-update.state` хранит установленную версию HOME NET bundle отдельно
-от версии failover:
+`/etc/home-net-update.state` хранит установленную и реально активированную версии
+HOME NET bundle отдельно от версии failover:
 
 ```text
-INSTALLED_BUNDLE_VERSION='1.5.2'
-INSTALLED_BUNDLE_TAG='v1.5.2'
-INSTALLED_AT='2026-10-04 12:00:00'
+INSTALLED_VERSION='1.5.3'
+ACTIVE_VERSION='1.5.2'
+UPDATE_STATUS='PENDING_APPLY'
+PENDING_ACTION='reboot'
+PENDING_REASON='reboot activation required'
+PENDING_VERSION='1.5.3'
+PENDING_BOOT_ID='...'
+LAST_UPDATE='2026-10-04 12:00:00'
+LAST_HEALTH_STATUS='OK'
 INSTALL_SOURCE='stable-release'
 ```
+
+Состояние выводится командой:
+
+```sh
+/usr/bin/home-net-update status
+```
+
+`UPDATE_STATUS` проходит через следующие состояния:
+
+- `OK` — installed и active совпадают, health успешен;
+- `UPDATE_AVAILABLE` — найден более новый stable release;
+- `INSTALLING` — installer выполняется;
+- `VERIFYING` — ожидается post-update Monitoring cycle;
+- `PENDING_APPLY` — файлы установлены, disruptive activation отложена;
+- `FAILED` — installer или activation/health завершились неуспешно.
+
+## Стратегия обновлений и восстановления
+
+Каждый release объявляет в `bundle.conf` класс действия:
+
+```text
+UPDATE_ACTION_CLASS='SAFE|CONTROLLED|CRITICAL'
+UPDATE_PENDING_ACTION='none|reboot|network_restart|...'
+UPDATE_PENDING_REASON='...'
+```
+
+### SAFE
+
+Автоматически устанавливаются скрипты HOME NET, Monitoring и updater, если
+bundle не меняет runtime-версию failover. После нового Monitoring cycle и
+успешного health gate одновременно повышаются `INSTALLED_VERSION` и
+`ACTIVE_VERSION`.
+
+### CONTROLLED
+
+Перед применением updater проверяет IPv4 default route, active VPN, отсутствие
+`/var/run/podkop-recovery.lock`, текущий health и удержание update lock. Затем
+создаётся `/var/run/home-net-update.in-progress`, а `podkop-health` временно
+останавливается, чтобы не запустить конкурирующий recovery. Monitoring продолжает
+работать. После installer `podkop-health` запускается, updater ждёт bounded health
+verification и только при `OK` повышает active version.
+
+`UNKNOWN` повторно проверяется в пределах timeout и retry limit. `FAIL` также
+получает ограниченное окно для штатного recovery `podkop-health`; бесконечных
+restart loops updater не создаёт.
+
+### CRITICAL
+
+Автоматическая disruptive activation запрещена. Installer запускается только в
+`HOME_NET_STAGE_ONLY=1`: runtime failover activation пропускается. После успешной
+установки безопасной части и health gate записывается:
+
+```text
+INSTALLED_VERSION=new
+ACTIVE_VERSION=old
+UPDATE_STATUS=PENDING_APPLY
+```
+
+Updater никогда автоматически не выполняет:
+
+- `/etc/init.d/network restart` или reload;
+- `service network restart` или reload;
+- `reboot`;
+- изменение LAN/WAN и `/etc/config/network`.
+
+Кроме классификации, скачанные installer проверяются на прямые команды network
+restart/reload и reboot. Обнаружение такой команды останавливает update.
+
+### Reboot pending
+
+Для `PENDING_ACTION='reboot'` автоматический reboot не выполняется. State хранит
+boot ID момента установки. После следующего штатного reboot daemon обнаруживает
+новый boot ID и повышает `ACTIVE_VERSION` до `INSTALLED_VERSION` только если
+текущий health полностью `OK`. Иначе pending сохраняется.
 
 ## Источник обновления
 
@@ -79,6 +159,7 @@ HOME_NET_UPDATE_STARTUP_DELAY='300'
 HOME_NET_UPDATE_COMMAND_TIMEOUT='120'
 HOME_NET_UPDATE_HEALTH_TIMEOUT='600'
 HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='10'
+HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES='3'
 ```
 
 Существующий `/etc/home-net-update.conf` при повторной установке не
@@ -132,8 +213,9 @@ FAKEIP=OK
 SERVICE_CHECK=OK
 ```
 
-`UNKNOWN`, `FAIL`, неполный state или timeout считаются неуспешным обновлением.
-Новая bundle version не фиксируется, дальнейший rollout прекращается.
+`UNKNOWN`, `FAIL`, неполный state или timeout не позволяют повысить
+`ACTIVE_VERSION`. Если installer уже успешно записал файлы, новая версия
+фиксируется как `INSTALLED_VERSION`, а state становится `FAILED`.
 
 ## Lock и восстановление
 
@@ -152,11 +234,21 @@ SERVICE_CHECK=OK
 автоматический откат сетевых сервисов опаснее контролируемого восстановления.
 При неуспешном health:
 
-1. updater не меняет установленную bundle version;
-2. пишет ошибку и путь backup в `logread`;
-3. оператор анализирует Monitoring и компонентные backup;
-4. при необходимости повторно запускает `install-all.sh` предыдущего стабильного
+1. при ошибке installer updater не меняет installed/active version;
+2. при ошибке активации installed version может быть новой, но active version
+   остаётся прежней;
+3. updater пишет ошибку и путь backup в `logread`;
+4. оператор анализирует Monitoring и компонентные backup;
+5. при необходимости повторно запускает `install-all.sh` предыдущего стабильного
    release tag.
+
+## Coordination limitation
+
+Текущая версия координируется с `podkop-health`, временно останавливая его на
+время CONTROLLED installer, и использует собственный marker. Репозитории
+`podkop-awg-failover` и `podkop-late-start` пока не читают этот marker. Для общей
+межрепозиторной блокировки recovery потребуется отдельный PR в failover repo;
+это не включено в текущий PR.
 
 Пример ручного rollback к предыдущему release:
 

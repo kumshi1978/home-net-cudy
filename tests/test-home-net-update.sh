@@ -15,6 +15,20 @@ cat > "$BIN/logger" <<'EOF_LOGGER'
 exit 0
 EOF_LOGGER
 
+cat > "$BIN/ip" <<'EOF_IP'
+#!/bin/sh
+case "$*" in
+    '-4 route show default') echo 'default via 192.0.2.1 dev wan' ;;
+esac
+exit 0
+EOF_IP
+
+cat > "$BIN/uci" <<'EOF_UCI'
+#!/bin/sh
+[ "$*" = '-q get podkop.main.interface' ] && echo awg_main
+exit 0
+EOF_UCI
+
 cat > "$BIN/curl" <<'EOF_CURL'
 #!/bin/sh
 out=""
@@ -35,10 +49,9 @@ case "$*" in
     */install-all.sh*) source_file="$MOCK_FIXTURES/install-all.sh" ;;
     *) exit 22 ;;
 esac
-
 cp "$source_file" "$out"
 EOF_CURL
-chmod +x "$BIN/logger" "$BIN/curl"
+chmod +x "$BIN/logger" "$BIN/ip" "$BIN/uci" "$BIN/curl"
 
 write_config() {
     cat > "$TMP/update.conf" <<'EOF_CONF'
@@ -50,6 +63,7 @@ HOME_NET_UPDATE_STARTUP_DELAY='0'
 HOME_NET_UPDATE_COMMAND_TIMEOUT='5'
 HOME_NET_UPDATE_HEALTH_TIMEOUT='2'
 HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='1'
+HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES='2'
 EOF_CONF
 }
 
@@ -58,9 +72,33 @@ write_release() {
     draft="$2"
     prerelease="$3"
     tag="${4:-v$version}"
+    class="${5:-SAFE}"
+    action="${6:-none}"
+    reason="${7:-none}"
     printf '{"tag_name":"%s","draft":%s,"prerelease":%s}\n' "$tag" "$draft" "$prerelease" > "$FIXTURES/release.json"
     printf '%s\n' "$version" > "$FIXTURES/VERSION"
-    printf "HOME_NET_BUNDLE_VERSION='%s'\n" "$version" > "$FIXTURES/bundle.conf"
+    {
+        printf "HOME_NET_BUNDLE_VERSION='%s'\n" "$version"
+        printf "UPDATE_ACTION_CLASS='%s'\n" "$class"
+        printf "UPDATE_PENDING_ACTION='%s'\n" "$action"
+        printf "UPDATE_PENDING_REASON='%s'\n" "$reason"
+    } > "$FIXTURES/bundle.conf"
+    MOCK_EXPECT_CLASS="$class"
+    [ "$class" = CRITICAL ] && MOCK_EXPECT_STAGE=1 || MOCK_EXPECT_STAGE=0
+}
+
+write_health() {
+    status="$1"
+    stamp="$2"
+    cat > "$TMP/health.state" <<EOF_HEALTH
+STATUS=$status
+PODKOP=RUNNING
+SING_BOX=RUNNING
+FAKEIP=OK
+SERVICE_CHECK=OK
+CHECK_STARTED=$stamp
+LAST_CHECK=$stamp
+EOF_HEALTH
 }
 
 write_installer() {
@@ -69,13 +107,14 @@ write_installer() {
 [ "$HOME_NET_BUNDLE_REF" = 'v1.5.2' ] || exit 3
 [ "$HOME_NET_UPDATE_IN_PROGRESS" = '1' ] || exit 3
 [ "$HOME_NET_SKIP_VERSION_RECORD" = '1' ] || exit 3
+[ "$HOME_NET_ACTION_CLASS" = "$MOCK_EXPECT_CLASS" ] || exit 3
+[ "$HOME_NET_STAGE_ONLY" = "$MOCK_EXPECT_STAGE" ] || exit 3
 if [ "${MOCK_INSTALL_FAIL:-0}" = "1" ]; then
     exit 1
 fi
-
-status="${MOCK_HEALTH_STATUS:-OK}"
+write_status="${MOCK_HEALTH_STATUS:-OK}"
 cat > "$MOCK_HEALTH_FILE" <<EOF_HEALTH
-STATUS=$status
+STATUS=$write_status
 PODKOP=RUNNING
 SING_BOX=RUNNING
 FAKEIP=OK
@@ -89,15 +128,37 @@ EOF_INSTALLER
 }
 
 write_state() {
-    printf "INSTALLED_BUNDLE_VERSION='%s'\n" "$1" > "$TMP/installed.state"
+    version="$1"
+    cat > "$TMP/installed.state" <<EOF_STATE
+INSTALLED_VERSION='$version'
+ACTIVE_VERSION='$version'
+UPDATE_STATUS='OK'
+PENDING_ACTION='none'
+PENDING_REASON='none'
+PENDING_VERSION='none'
+PENDING_BOOT_ID='none'
+LAST_UPDATE='2000-01-01 00:00:00'
+LAST_HEALTH_STATUS='OK'
+INSTALL_SOURCE='test'
+EOF_STATE
+}
+
+state_value() {
+    sed -n "s/^$1='\([^']*\)'$/\1/p" "$TMP/installed.state"
 }
 
 reset_case() {
     rm -rf "$TMP/runtime" "$TMP/lock"
-    rm -f "$TMP/health.state" "$TMP/output"
+    rm -f "$TMP/output" "$TMP/coordination"
     mkdir -p "$TMP/runtime"
+    printf 'boot-one\n' > "$TMP/boot-id"
     write_config
     write_installer
+    write_health OK '2000-01-01 00:00:00'
+    MOCK_EXPECT_CLASS=SAFE
+    MOCK_EXPECT_STAGE=0
+    MOCK_INSTALL_FAIL=0
+    MOCK_HEALTH_STATUS=OK
 }
 
 run_updater() {
@@ -105,10 +166,16 @@ run_updater() {
     PATH="$BIN:$PATH" \
     MOCK_FIXTURES="$FIXTURES" \
     MOCK_HEALTH_FILE="$TMP/health.state" \
+    MOCK_EXPECT_CLASS="$MOCK_EXPECT_CLASS" \
+    MOCK_EXPECT_STAGE="$MOCK_EXPECT_STAGE" \
+    MOCK_INSTALL_FAIL="$MOCK_INSTALL_FAIL" \
+    MOCK_HEALTH_STATUS="$MOCK_HEALTH_STATUS" \
     HOME_NET_UPDATE_CONF="$TMP/update.conf" \
     HOME_NET_UPDATE_STATE_FILE="$TMP/installed.state" \
     HOME_NET_UPDATE_RUNTIME_DIR="$TMP/runtime" \
     HOME_NET_UPDATE_LOCK_DIR="$TMP/lock" \
+    HOME_NET_UPDATE_COORDINATION_MARKER="$TMP/coordination" \
+    HOME_NET_UPDATE_BOOT_ID_FILE="$TMP/boot-id" \
     HOME_NET_UPDATE_HEALTH_STATE="$TMP/health.state" \
     HOME_NET_UPDATE_BACKUP_ROOT="$TMP/backups" \
     HOME_NET_UPDATE_API_URL='https://mock.invalid/releases/latest' \
@@ -135,6 +202,15 @@ assert_output() {
     }
 }
 
+assert_state() {
+    actual="$(state_value "$1")"
+    [ "$actual" = "$2" ] || {
+        cat "$TMP/installed.state" >&2
+        echo "$1 expected $2, got $actual" >&2
+        exit 1
+    }
+}
+
 case_no_update() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.2
     run_updater check; assert_rc 0; assert_output 'latest stable release'
@@ -142,7 +218,9 @@ case_no_update() {
 
 case_update_available() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.1
-    run_updater check; assert_rc 0; assert_output 'update available: 1.5.1 -> 1.5.2'
+    run_updater check; assert_rc 0
+    assert_state UPDATE_STATUS UPDATE_AVAILABLE
+    assert_state INSTALLED_VERSION 1.5.1
 }
 
 case_no_downgrade() {
@@ -165,12 +243,6 @@ case_prerelease_rejected() {
     run_updater check; [ "$RUN_RC" -ne 0 ] || exit 1; assert_output 'prerelease or metadata is invalid'
 }
 
-case_installer_failure() {
-    reset_case; write_release 1.5.2 false false; write_state 1.5.1
-    MOCK_INSTALL_FAIL=1 run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
-    grep -Fq "INSTALLED_BUNDLE_VERSION='1.5.1'" "$TMP/installed.state"
-}
-
 case_non_canary_rejected() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.1
     sed -i "s/HOME_NET_UPDATE_CANARY='1'/HOME_NET_UPDATE_CANARY='0'/" "$TMP/update.conf"
@@ -178,25 +250,95 @@ case_non_canary_rejected() {
     assert_output "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
 }
 
-case_health_unknown() {
+case_safe_update() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.1
-    MOCK_HEALTH_STATUS=UNKNOWN run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
-    assert_output 'STATUS=UNKNOWN'
-    grep -Fq "INSTALLED_BUNDLE_VERSION='1.5.1'" "$TMP/installed.state"
+    run_updater apply; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_state UPDATE_STATUS OK
 }
 
-case_health_fail() {
-    reset_case; write_release 1.5.2 false false; write_state 1.5.1
-    MOCK_HEALTH_STATUS=FAIL run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
-    assert_output 'STATUS=FAIL'
-    grep -Fq "INSTALLED_BUNDLE_VERSION='1.5.1'" "$TMP/installed.state"
+case_controlled_success() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
+    run_updater apply; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_state UPDATE_STATUS OK
+    [ ! -e "$TMP/coordination" ]
 }
 
-case_health_ok() {
+case_controlled_health_fail() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
+    MOCK_HEALTH_STATUS=FAIL
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.1
+    assert_state UPDATE_STATUS FAILED
+    assert_state LAST_HEALTH_STATUS FAIL
+}
+
+case_controlled_health_unknown() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
+    MOCK_HEALTH_STATUS=UNKNOWN
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.1
+    assert_state UPDATE_STATUS FAILED
+    assert_state LAST_HEALTH_STATUS UNKNOWN
+}
+
+case_critical_pending() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CRITICAL network_restart 'network activation required'; write_state 1.5.1
+    run_updater apply; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.1
+    assert_state UPDATE_STATUS PENDING_APPLY
+    assert_state PENDING_ACTION network_restart
+}
+
+case_reboot_pending_and_promoted() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CRITICAL reboot 'reboot activation required'; write_state 1.5.1
+    run_updater apply; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.1
+    assert_state PENDING_ACTION reboot
+    printf 'boot-two\n' > "$TMP/boot-id"
+    run_updater reconcile; assert_rc 0
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_state UPDATE_STATUS OK
+}
+
+case_pending_survives_restart() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CRITICAL network_restart 'manual activation required'; write_state 1.5.1
+    run_updater apply; assert_rc 0
+    run_updater status; assert_rc 0
+    assert_output 'Status:    PENDING_APPLY'
+    assert_output 'Pending:   network_restart'
+}
+
+case_installer_failure() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.1
-    MOCK_HEALTH_STATUS=OK run_updater apply; assert_rc 0
-    grep -Fq "INSTALLED_BUNDLE_VERSION='1.5.2'" "$TMP/installed.state"
-    assert_output 'applied and recorded successfully'
+    MOCK_INSTALL_FAIL=1
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_state ACTIVE_VERSION 1.5.1
+    assert_state UPDATE_STATUS FAILED
+}
+
+case_forbidden_network_restart() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
+    printf '\n/etc/init.d/network restart\n' >> "$FIXTURES/install-all.sh"
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_output 'automatic network restart or reboot'
+    assert_state INSTALLED_VERSION 1.5.1
+}
+
+case_forbidden_reboot() {
+    reset_case; write_release 1.5.2 false false v1.5.2 CRITICAL reboot required; write_state 1.5.1
+    printf '\nreboot\n' >> "$FIXTURES/install-all.sh"
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_output 'automatic network restart or reboot'
+    assert_state ACTIVE_VERSION 1.5.1
 }
 
 case_stale_lock() {
@@ -214,10 +356,16 @@ for test_case in \
     case_draft_rejected \
     case_prerelease_rejected \
     case_non_canary_rejected \
+    case_safe_update \
+    case_controlled_success \
+    case_controlled_health_fail \
+    case_controlled_health_unknown \
+    case_critical_pending \
+    case_reboot_pending_and_promoted \
+    case_pending_survives_restart \
     case_installer_failure \
-    case_health_unknown \
-    case_health_fail \
-    case_health_ok \
+    case_forbidden_network_restart \
+    case_forbidden_reboot \
     case_stale_lock
 do
     "$test_case"

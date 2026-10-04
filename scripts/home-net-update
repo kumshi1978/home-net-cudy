@@ -8,6 +8,8 @@ LOCK_DIR=${HOME_NET_UPDATE_LOCK_DIR:-/var/run/home-net-update.lock}
 HEALTH_STATE=${HOME_NET_UPDATE_HEALTH_STATE:-/tmp/podkop-service-health/state}
 BACKUP_ROOT=${HOME_NET_UPDATE_BACKUP_ROOT:-/root}
 UPDATED_MARKER="$RUNTIME_DIR/updated"
+COORDINATION_MARKER=${HOME_NET_UPDATE_COORDINATION_MARKER:-/var/run/home-net-update.in-progress}
+BOOT_ID_FILE=${HOME_NET_UPDATE_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}
 TAG=home-net-update
 REPO=${HOME_NET_UPDATE_REPO:-kumshi1978/home-net-cudy}
 API_URL=${HOME_NET_UPDATE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
@@ -23,7 +25,11 @@ STARTUP_DELAY=${HOME_NET_UPDATE_STARTUP_DELAY:-300}
 COMMAND_TIMEOUT=${HOME_NET_UPDATE_COMMAND_TIMEOUT:-120}
 HEALTH_TIMEOUT=${HOME_NET_UPDATE_HEALTH_TIMEOUT:-600}
 HEALTH_RETRY_INTERVAL=${HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL:-10}
+HEALTH_MAX_BAD_CYCLES=${HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES:-3}
 UPDATED=0
+COORDINATION_ACTIVE=0
+PODKOP_HEALTH_STOPPED=0
+LAST_HEALTH_RESULT=UNKNOWN
 
 log() { logger -t "$TAG" "$*" 2>/dev/null || true; printf '%s\n' "$*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
@@ -50,6 +56,14 @@ bounded_run() {
 }
 
 release_lock() {
+    if [ "$PODKOP_HEALTH_STOPPED" = "1" ] && [ -x /etc/init.d/podkop-health ]; then
+        /etc/init.d/podkop-health start >/dev/null 2>&1 || true
+        PODKOP_HEALTH_STOPPED=0
+    fi
+    if [ "$COORDINATION_ACTIVE" = "1" ]; then
+        rm -f "$COORDINATION_MARKER"
+        COORDINATION_ACTIVE=0
+    fi
     rm -f "$LOCK_DIR/pid"
     rmdir "$LOCK_DIR" 2>/dev/null || true
     trap - EXIT INT TERM
@@ -109,9 +123,16 @@ state_value() {
 }
 
 installed_version() {
-    current="$(state_value INSTALLED_BUNDLE_VERSION "$INSTALLED_STATE")"
+    current="$(state_value INSTALLED_VERSION "$INSTALLED_STATE")"
+    [ -n "$current" ] || current="$(state_value INSTALLED_BUNDLE_VERSION "$INSTALLED_STATE")"
     [ -n "$current" ] || current=0.0.0
     valid_version "$current" || die "invalid installed bundle version: $current"
+}
+
+active_version() {
+    active="$(state_value ACTIVE_VERSION "$INSTALLED_STATE")"
+    [ -n "$active" ] || active="$current"
+    valid_version "$active" || die "invalid active bundle version: $active"
 }
 
 fetch_release() {
@@ -165,6 +186,19 @@ download_release_payload() {
     [ "$downloaded_version" = "$release_version" ] || die "release VERSION does not match tag"
     grep -Fq "HOME_NET_BUNDLE_VERSION='$release_version'" "$bundle_file" || die "bundle.conf version does not match release"
     sh -n "$installer" || die "downloaded install-all.sh failed syntax validation"
+
+    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$installer"; then
+        die "install-all.sh contains an automatic network restart or reboot"
+    fi
+
+    UPDATE_ACTION_CLASS="$(sed -n "s/^UPDATE_ACTION_CLASS='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
+    UPDATE_PENDING_ACTION="$(sed -n "s/^UPDATE_PENDING_ACTION='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
+    UPDATE_PENDING_REASON="$(sed -n "s/^UPDATE_PENDING_REASON='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
+    case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) die "invalid or missing UPDATE_ACTION_CLASS" ;; esac
+    [ -n "$UPDATE_PENDING_ACTION" ] || UPDATE_PENDING_ACTION=none
+    if [ "$UPDATE_ACTION_CLASS" = "CRITICAL" ] && [ "$UPDATE_PENDING_ACTION" = "none" ]; then
+        die "CRITICAL release must declare UPDATE_PENDING_ACTION"
+    fi
 }
 
 create_backup() {
@@ -188,39 +222,59 @@ health_value() {
     sed -n "s/^${key}=//p" "$HEALTH_STATE" | tail -n 1
 }
 
+evaluate_health() {
+    health_status="$(health_value STATUS)"
+    LAST_HEALTH_RESULT="$health_status"
+    [ "$health_status" = "OK" ] || {
+        [ "$health_status" = "UNKNOWN" ] || LAST_HEALTH_RESULT=FAIL
+        return 1
+    }
+
+    for required in \
+        PODKOP=RUNNING \
+        SING_BOX=RUNNING \
+        FAKEIP=OK \
+        SERVICE_CHECK=OK
+    do
+        key=${required%%=*}
+        expected=${required#*=}
+        actual="$(health_value "$key")"
+        if [ "$actual" != "$expected" ]; then
+            LAST_HEALTH_RESULT=FAIL
+            return 1
+        fi
+    done
+    LAST_HEALTH_RESULT=OK
+    return 0
+}
+
 wait_for_healthy_cycle() {
     before_last="$1"
     before_started="$2"
     elapsed=0
+    bad_cycles=0
+    seen_last="$before_last"
 
     while [ "$elapsed" -lt "$HEALTH_TIMEOUT" ]; do
         last_check="$(health_value LAST_CHECK)"
         check_started="$(health_value CHECK_STARTED)"
         fresh=0
-        [ -n "$last_check" ] && [ "$last_check" != "$before_last" ] && fresh=1
+        [ -n "$last_check" ] && [ "$last_check" != "$seen_last" ] && fresh=1
         if [ "$fresh" -eq 0 ] && [ -n "$last_check" ] && \
            [ "$check_started" != "$before_started" ] && [ "$last_check" = "$check_started" ]; then
             fresh=1
         fi
 
         if [ "$fresh" -eq 1 ]; then
-            for required in \
-                STATUS=OK \
-                PODKOP=RUNNING \
-                SING_BOX=RUNNING \
-                FAKEIP=OK \
-                SERVICE_CHECK=OK
-            do
-                key=${required%%=*}
-                expected=${required#*=}
-                actual="$(health_value "$key")"
-                [ "$actual" = "$expected" ] || {
-                    log "post-update health failed: $key=${actual:-missing}, expected $expected"
-                    return 1
-                }
-            done
-            log "post-update Monitoring cycle is healthy"
-            return 0
+            seen_last="$last_check"
+            before_started="$check_started"
+            if evaluate_health; then
+                log "post-update Monitoring cycle is healthy"
+                return 0
+            fi
+            bad_cycles=$((bad_cycles + 1))
+            log "post-update health is $LAST_HEALTH_RESULT ($bad_cycles/$HEALTH_MAX_BAD_CYCLES)"
+            [ "$bad_cycles" -lt "$HEALTH_MAX_BAD_CYCLES" ] || return 1
         fi
 
         sleep "$HEALTH_RETRY_INTERVAL"
@@ -228,21 +282,131 @@ wait_for_healthy_cycle() {
     done
 
     log "post-update health timed out after ${HEALTH_TIMEOUT}s"
+    [ "$bad_cycles" -gt 0 ] || LAST_HEALTH_RESULT=UNKNOWN
     return 1
 }
 
-write_installed_state() {
+clean_state_value() {
+    printf '%s' "$1" | tr -d "\r\n'"
+}
+
+write_update_state() {
+    new_installed="$(clean_state_value "$1")"
+    new_active="$(clean_state_value "$2")"
+    new_status="$(clean_state_value "$3")"
+    new_pending_action="$(clean_state_value "$4")"
+    new_pending_reason="$(clean_state_value "$5")"
+    new_pending_version="$(clean_state_value "$6")"
+    new_health="$(clean_state_value "$7")"
+    new_pending_boot="$(clean_state_value "${8:-none}")"
     state_dir=${INSTALLED_STATE%/*}
     [ "$state_dir" = "$INSTALLED_STATE" ] || mkdir -p "$state_dir"
     state_tmp="$INSTALLED_STATE.tmp.$$"
     {
-        printf "INSTALLED_BUNDLE_VERSION='%s'\n" "$release_version"
-        printf "INSTALLED_BUNDLE_TAG='%s'\n" "$release_tag"
-        printf "INSTALLED_AT='%s'\n" "$(date '+%F %T')"
+        printf "INSTALLED_VERSION='%s'\n" "$new_installed"
+        printf "ACTIVE_VERSION='%s'\n" "$new_active"
+        printf "UPDATE_STATUS='%s'\n" "$new_status"
+        printf "PENDING_ACTION='%s'\n" "$new_pending_action"
+        printf "PENDING_REASON='%s'\n" "$new_pending_reason"
+        printf "PENDING_VERSION='%s'\n" "$new_pending_version"
+        printf "PENDING_BOOT_ID='%s'\n" "$new_pending_boot"
+        printf "LAST_UPDATE='%s'\n" "$(date '+%F %T')"
+        printf "LAST_HEALTH_STATUS='%s'\n" "$new_health"
         printf "INSTALL_SOURCE='stable-release'\n"
     } > "$state_tmp"
     chmod 0600 "$state_tmp"
     mv "$state_tmp" "$INSTALLED_STATE"
+}
+
+current_boot_id() {
+    if [ -r "$BOOT_ID_FILE" ]; then
+        read boot_id < "$BOOT_ID_FILE"
+        printf '%s' "$boot_id"
+    else
+        printf 'unknown'
+    fi
+}
+
+begin_controlled_action() {
+    [ -r "$LOCK_DIR/pid" ] || die "update lock is not held"
+    ip -4 route show default 2>/dev/null | grep -q '^default ' || die "CONTROLLED preflight failed: no IPv4 default route"
+    active_vpn="$(uci -q get podkop.main.interface 2>/dev/null || true)"
+    [ -n "$active_vpn" ] && [ "$active_vpn" != "unknown" ] || die "CONTROLLED preflight failed: active VPN is unknown"
+    [ ! -e /var/run/podkop-recovery.lock ] || die "CONTROLLED preflight failed: Podkop recovery is active"
+    evaluate_health || die "CONTROLLED preflight failed: health is $LAST_HEALTH_RESULT"
+
+    marker_dir=${COORDINATION_MARKER%/*}
+    [ "$marker_dir" = "$COORDINATION_MARKER" ] || mkdir -p "$marker_dir"
+    {
+        printf "PID='%s'\n" "$$"
+        printf "VERSION='%s'\n" "$release_version"
+        printf "CLASS='CONTROLLED'\n"
+    } > "$COORDINATION_MARKER"
+    COORDINATION_ACTIVE=1
+
+    if [ -x /etc/init.d/podkop-health ]; then
+        /etc/init.d/podkop-health stop >/dev/null 2>&1 || die "cannot pause podkop-health for CONTROLLED action"
+        PODKOP_HEALTH_STOPPED=1
+    fi
+    log "CONTROLLED preflight passed; recovery coordination marker created"
+}
+
+resume_controlled_recovery() {
+    if [ "$PODKOP_HEALTH_STOPPED" = "1" ] && [ -x /etc/init.d/podkop-health ]; then
+        /etc/init.d/podkop-health start >/dev/null 2>&1 || true
+        PODKOP_HEALTH_STOPPED=0
+    fi
+}
+
+record_update_available() {
+    installed_version
+    active_version
+    existing_status="$(state_value UPDATE_STATUS "$INSTALLED_STATE")"
+    case "$existing_status" in PENDING_APPLY|INSTALLING|VERIFYING|FAILED) return 0 ;; esac
+    evaluate_health || true
+    write_update_state "$current" "$active" UPDATE_AVAILABLE none \
+        "stable release $release_version is available" "$release_version" "$LAST_HEALTH_RESULT" none
+}
+
+reconcile_pending_reboot() {
+    pending_status="$(state_value UPDATE_STATUS "$INSTALLED_STATE")"
+    pending_action="$(state_value PENDING_ACTION "$INSTALLED_STATE")"
+    [ "$pending_status" = "PENDING_APPLY" ] && [ "$pending_action" = "reboot" ] || return 0
+
+    installed_version
+    active_version
+    pending_boot="$(state_value PENDING_BOOT_ID "$INSTALLED_STATE")"
+    boot_now="$(current_boot_id)"
+    [ -n "$pending_boot" ] && [ "$pending_boot" != "none" ] && \
+        [ "$pending_boot" != "unknown" ] && [ "$boot_now" != "$pending_boot" ] || return 0
+
+    if evaluate_health; then
+        write_update_state "$current" "$current" OK none none none OK none
+        log "pending reboot completed; active HOME NET version promoted to $current"
+    else
+        log "pending reboot detected, but health is $LAST_HEALTH_RESULT; activation remains pending"
+    fi
+}
+
+show_status() {
+    installed="$(state_value INSTALLED_VERSION "$INSTALLED_STATE")"
+    [ -n "$installed" ] || installed="$(state_value INSTALLED_BUNDLE_VERSION "$INSTALLED_STATE")"
+    [ -n "$installed" ] || installed=0.0.0
+    active_state="$(state_value ACTIVE_VERSION "$INSTALLED_STATE")"
+    [ -n "$active_state" ] || active_state="$installed"
+    update_state="$(state_value UPDATE_STATUS "$INSTALLED_STATE")"
+    [ -n "$update_state" ] || update_state=OK
+    pending_state="$(state_value PENDING_ACTION "$INSTALLED_STATE")"
+    [ -n "$pending_state" ] || pending_state=none
+    health_state="$(state_value LAST_HEALTH_STATUS "$INSTALLED_STATE")"
+    [ -n "$health_state" ] || health_state=UNKNOWN
+
+    printf '%s\n' 'HOME NET updater'
+    printf 'Installed: %s\n' "$installed"
+    printf 'Active:    %s\n' "$active_state"
+    printf 'Status:    %s\n' "$update_state"
+    printf 'Pending:   %s\n' "$pending_state"
+    printf 'Health:    %s\n' "$health_state"
 }
 
 apply_release() {
@@ -252,25 +416,58 @@ apply_release() {
     check_rc=$?
     [ "$check_rc" -eq 10 ] || return "$check_rc"
 
+    active_version
     download_release_payload
     create_backup
     before_last="$(health_value LAST_CHECK)"
     before_started="$(health_value CHECK_STARTED)"
 
-    log "applying stable HOME NET bundle $release_tag"
+    case "$UPDATE_ACTION_CLASS" in
+        SAFE) stage_only=0 ;;
+        CONTROLLED) stage_only=0; begin_controlled_action ;;
+        CRITICAL) stage_only=1; log "CRITICAL activation will be staged as PENDING_APPLY" ;;
+    esac
+
+    evaluate_health || true
+    write_update_state "$current" "$active" INSTALLING none \
+        "installing $release_tag ($UPDATE_ACTION_CLASS)" "$release_version" "$LAST_HEALTH_RESULT" none
+
+    log "installing stable HOME NET bundle $release_tag class=$UPDATE_ACTION_CLASS"
     if ! HOME_NET_BUNDLE_REF="$release_tag" \
          HOME_NET_UPDATE_IN_PROGRESS=1 \
          HOME_NET_SKIP_VERSION_RECORD=1 \
+         HOME_NET_ACTION_CLASS="$UPDATE_ACTION_CLASS" \
+         HOME_NET_STAGE_ONLY="$stage_only" \
          sh "$installer"
     then
+        resume_controlled_recovery
+        evaluate_health || true
+        write_update_state "$current" "$active" FAILED none \
+            "bundle installer failed" "$release_version" "$LAST_HEALTH_RESULT" none
         die "bundle installer failed; installed version was not changed; backup: $backup"
     fi
 
+    resume_controlled_recovery
+    write_update_state "$release_version" "$active" VERIFYING none \
+        "waiting for post-update health" "$release_version" UNKNOWN none
     if ! wait_for_healthy_cycle "$before_last" "$before_started"; then
-        die "bundle installed but post-update health failed; installed version was not changed; backup: $backup"
+        write_update_state "$release_version" "$active" FAILED verification \
+            "post-update health did not become OK" "$release_version" "$LAST_HEALTH_RESULT" none
+        die "bundle installed but activation health failed; active version was not changed; backup: $backup"
     fi
 
-    write_installed_state
+    if [ "$UPDATE_ACTION_CLASS" = "CRITICAL" ]; then
+        pending_boot=none
+        [ "$UPDATE_PENDING_ACTION" = "reboot" ] && pending_boot="$(current_boot_id)"
+        write_update_state "$release_version" "$active" PENDING_APPLY \
+            "$UPDATE_PENDING_ACTION" "$UPDATE_PENDING_REASON" "$release_version" OK "$pending_boot"
+        UPDATED=1
+        : > "$UPDATED_MARKER"
+        log "bundle $release_tag installed; CRITICAL action $UPDATE_PENDING_ACTION remains pending"
+        return 0
+    fi
+
+    write_update_state "$release_version" "$release_version" OK none none none OK none
     UPDATED=1
     : > "$UPDATED_MARKER"
     log "stable HOME NET bundle $release_tag applied and recorded successfully"
@@ -314,8 +511,16 @@ cohort_delay() {
 run_once() {
     acquire_lock || { log "another HOME NET update is already running; skipped"; return 0; }
     case "$1" in
-        check) check_release; rc=$?; [ "$rc" -eq 10 ] && rc=0 ;;
+        check)
+            check_release
+            rc=$?
+            if [ "$rc" -eq 10 ]; then
+                record_update_available
+                rc=0
+            fi
+            ;;
         apply) apply_release; rc=$? ;;
+        reconcile) reconcile_pending_reboot; rc=$? ;;
         *) rc=2 ;;
     esac
     release_lock
@@ -327,6 +532,7 @@ daemon() {
     [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
 
     sleep "$STARTUP_DELAY"
+    "$0" reconcile || true
     delay="$(cohort_delay)"
     log "automatic HOME NET mode=$MODE canary=$CANARY fleet_delay=${delay}s interval=${INTERVAL}s"
     sleep "$delay"
@@ -342,15 +548,18 @@ daemon() {
 
 for tool in curl grep sed tr logger; do need "$tool"; done
 case "$CANARY" in 0|1) ;; *) die "HOME_NET_UPDATE_CANARY must be 0 or 1" ;; esac
-for number in "$INTERVAL" "$JITTER" "$STARTUP_DELAY" "$COMMAND_TIMEOUT" "$HEALTH_TIMEOUT" "$HEALTH_RETRY_INTERVAL"; do
+for number in "$INTERVAL" "$JITTER" "$STARTUP_DELAY" "$COMMAND_TIMEOUT" "$HEALTH_TIMEOUT" "$HEALTH_RETRY_INTERVAL" "$HEALTH_MAX_BAD_CYCLES"; do
     valid_uint "$number" || die "update timing values must be non-negative integers"
 done
 [ "$COMMAND_TIMEOUT" -gt 0 ] || die "HOME_NET_UPDATE_COMMAND_TIMEOUT must be greater than zero"
 [ "$HEALTH_TIMEOUT" -gt 0 ] || die "HOME_NET_UPDATE_HEALTH_TIMEOUT must be greater than zero"
 [ "$HEALTH_RETRY_INTERVAL" -gt 0 ] || die "HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL must be greater than zero"
+[ "$HEALTH_MAX_BAD_CYCLES" -gt 0 ] || die "HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES must be greater than zero"
 case "${1:-}" in
     check) run_once check ;;
     apply) run_once apply ;;
     daemon) daemon ;;
-    *) printf 'Usage: %s {check|apply|daemon}\n' "$0" >&2; exit 2 ;;
+    status) show_status ;;
+    reconcile) run_once reconcile ;;
+    *) printf 'Usage: %s {check|apply|daemon|status}\n' "$0" >&2; exit 2 ;;
 esac
