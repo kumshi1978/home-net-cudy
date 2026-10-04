@@ -23,7 +23,8 @@
 
 ## Текущая версия
 
-**v1.5.2 — HOME NET unified bundle с верхнеуровневым stable-release updater.**
+**v1.5.2 candidate/development — HOME NET unified bundle с верхнеуровневым
+stable-release updater.** Версия ещё не опубликована как stable GitHub Release.
 
 Состав bundle:
 
@@ -50,7 +51,7 @@ Bundle устанавливает `/usr/bin/home-net-update`, который п�
 ## Единая установка HOME NET
 
 Для обычного роутера безопасный режим HOME NET updater по умолчанию — `check`.
-Для стабильной установки используйте опубликованный release tag:
+После публикации stable release установка будет выполняться по фиксированному tag:
 
 ```sh
 wget -qO /tmp/home-net-install-all.sh \

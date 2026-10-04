@@ -10,13 +10,19 @@ MONITORING_INSTALL="$TMP_DIR/monitoring-install.sh"
 HOME_NET_UPDATE_SRC="$TMP_DIR/home-net-update"
 HOME_NET_UPDATE_INIT_SRC="$TMP_DIR/home-net-update.init"
 HOME_NET_UPDATE_CONF_SRC="$TMP_DIR/home-net-update.conf"
-HOME_NET_UPDATE_STATE="/etc/home-net-update.state"
+HOME_NET_UPDATE_BIN="${HOME_NET_UPDATE_BIN:-/usr/bin/home-net-update}"
+HOME_NET_UPDATE_INIT="${HOME_NET_UPDATE_INIT:-/etc/init.d/home-net-update}"
+HOME_NET_UPDATE_CONF="${HOME_NET_UPDATE_CONF:-/etc/home-net-update.conf}"
+HOME_NET_UPDATE_STATE="${HOME_NET_UPDATE_STATE:-/etc/home-net-update.state}"
+HOME_NET_FAILOVER_CONF="${HOME_NET_FAILOVER_CONF:-/etc/podkop-awg-failover.conf}"
+HOME_NET_OPENWRT_RELEASE="${HOME_NET_OPENWRT_RELEASE:-/etc/openwrt_release}"
+HOME_NET_UPDATER_BACKUP_ROOT="${HOME_NET_UPDATER_BACKUP_ROOT:-/root}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT HUP INT TERM
 
-[ -f /etc/openwrt_release ] || fail "OpenWrt not detected"
+[ -f "$HOME_NET_OPENWRT_RELEASE" ] || fail "OpenWrt not detected"
 mkdir -p "$TMP_DIR"
 
 fetch() {
@@ -29,6 +35,35 @@ fetch() {
     else
         fail "wget or curl is required"
     fi
+}
+
+reject_disruptive_actions() {
+    payload="$1"
+    label="$2"
+    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$payload"; then
+        fail "$label contains a forbidden network restart or reboot"
+    fi
+}
+
+install_shell_atomically() {
+    source_file="$1"
+    destination="$2"
+    temp_file="${destination}.new.$$"
+
+    rm -f "$temp_file"
+    cp "$source_file" "$temp_file" || fail "cannot stage $destination"
+    if ! sh -n "$temp_file"; then
+        rm -f "$temp_file"
+        fail "staged shell syntax check failed: $destination"
+    fi
+    chmod 0755 "$temp_file" || {
+        rm -f "$temp_file"
+        fail "cannot set mode on staged $destination"
+    }
+    mv -f "$temp_file" "$destination" || {
+        rm -f "$temp_file"
+        fail "cannot atomically install $destination"
+    }
 }
 
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
@@ -66,8 +101,11 @@ fetch "$HOME_NET_UPDATE_CONF_URL" "$HOME_NET_UPDATE_CONF_SRC"
 sh -n "$MONITORING_INSTALL" || fail "monitoring installer syntax check failed"
 sh -n "$HOME_NET_UPDATE_SRC" || fail "HOME NET updater syntax check failed"
 sh -n "$HOME_NET_UPDATE_INIT_SRC" || fail "HOME NET updater init syntax check failed"
+reject_disruptive_actions "$MONITORING_INSTALL" "monitoring installer"
+reject_disruptive_actions "$HOME_NET_UPDATE_SRC" "HOME NET updater"
+reject_disruptive_actions "$HOME_NET_UPDATE_INIT_SRC" "HOME NET updater init"
 
-INSTALLED_FAILOVER="$(sed -n "s/^INSTALLED_VERSION='\([^']*\)'$/\1/p" /etc/podkop-awg-failover.conf 2>/dev/null | tail -n 1)"
+INSTALLED_FAILOVER="$(sed -n "s/^INSTALLED_VERSION='\([^']*\)'$/\1/p" "$HOME_NET_FAILOVER_CONF" 2>/dev/null | tail -n 1)"
 NEED_FAILOVER=0
 [ "$INSTALLED_FAILOVER" = "$FAILOVER_VERSION" ] || NEED_FAILOVER=1
 
@@ -78,9 +116,7 @@ if [ "$NEED_FAILOVER" = "1" ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ]; then
     fetch "$FAILOVER_URL" "$FAILOVER_INSTALL"
     sh -n "$FAILOVER_INSTALL" || fail "failover installer syntax check failed"
     grep -Fq "SCRIPT_VERSION=\"$FAILOVER_VERSION\"" "$FAILOVER_INSTALL" || fail "failover installer version mismatch"
-    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$FAILOVER_INSTALL"; then
-        fail "failover installer contains a forbidden network restart or reboot"
-    fi
+    reject_disruptive_actions "$FAILOVER_INSTALL" "failover installer"
 fi
 
 if [ "${HOME_NET_STAGE_ONLY:-0}" = "1" ]; then
@@ -102,29 +138,28 @@ printf '\n===== INSTALL MONITORING =====\n'
 sh "$MONITORING_INSTALL"
 
 printf '\n===== INSTALL HOME NET UPDATER =====\n'
-UPDATER_BACKUP="/root/home-net-updater-backup-$(date +%Y%m%d-%H%M%S)"
+UPDATER_BACKUP="$HOME_NET_UPDATER_BACKUP_ROOT/home-net-updater-backup-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$UPDATER_BACKUP"
-for FILE in /usr/bin/home-net-update /etc/init.d/home-net-update /etc/home-net-update.conf "$HOME_NET_UPDATE_STATE"
+for FILE in "$HOME_NET_UPDATE_BIN" "$HOME_NET_UPDATE_INIT" "$HOME_NET_UPDATE_CONF" "$HOME_NET_UPDATE_STATE"
 do
     [ -f "$FILE" ] && cp -p "$FILE" "$UPDATER_BACKUP/"
 done
 
-cp "$HOME_NET_UPDATE_SRC" /usr/bin/home-net-update
-cp "$HOME_NET_UPDATE_INIT_SRC" /etc/init.d/home-net-update
-chmod 0755 /usr/bin/home-net-update /etc/init.d/home-net-update
+install_shell_atomically "$HOME_NET_UPDATE_SRC" "$HOME_NET_UPDATE_BIN"
+install_shell_atomically "$HOME_NET_UPDATE_INIT_SRC" "$HOME_NET_UPDATE_INIT"
 
-if [ ! -f /etc/home-net-update.conf ]; then
-    cp "$HOME_NET_UPDATE_CONF_SRC" /etc/home-net-update.conf
-    chmod 0600 /etc/home-net-update.conf
+if [ ! -f "$HOME_NET_UPDATE_CONF" ]; then
+    cp "$HOME_NET_UPDATE_CONF_SRC" "$HOME_NET_UPDATE_CONF"
+    chmod 0600 "$HOME_NET_UPDATE_CONF"
 fi
 
-/etc/init.d/home-net-update enable
+"$HOME_NET_UPDATE_INIT" enable
 if [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" != "1" ]; then
-    /etc/init.d/home-net-update restart
+    "$HOME_NET_UPDATE_INIT" restart
 fi
 
 printf '\n===== FINAL CHECK =====\n'
-grep '^INSTALLED_VERSION=' /etc/podkop-awg-failover.conf 2>/dev/null || true
+grep '^INSTALLED_VERSION=' "$HOME_NET_FAILOVER_CONF" 2>/dev/null || true
 uci -q get podkop.main.interface 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-awg-update' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-awg-failover' 2>/dev/null || true
