@@ -7,7 +7,9 @@ CONF="/etc/podkop-service-check.conf"
 
 [ -r "$CONF" ] && . "$CONF"
 
-FAKEIP_DOMAINS="${FAKEIP_DOMAINS:-github.com unifi.ui.com claude.ai gemini.google.com}"
+# Only domains that are expected to use VPN/FakeIP belong here.
+# UniFi direct-exclusion domains must not be used as mandatory FakeIP probes.
+FAKEIP_DOMAINS="${FAKEIP_DOMAINS:-github.com claude.ai gemini.google.com}"
 
 check_fakeip() {
     HOST="$1"
