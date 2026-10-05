@@ -74,10 +74,10 @@ wait_for_startup_ready() {
     [ "$STARTUP_POLL_INTERVAL" -gt 0 ] || STARTUP_POLL_INTERVAL=5
 
     WAITED=0
-    log "startup readiness: waiting up to ${STARTUP_GRACE}s for Podkop/sing-box"
+    log "startup readiness: waiting up to ${STARTUP_GRACE}s for Podkop/sing-box/FakeIP"
 
     while [ "$WAITED" -lt "$STARTUP_GRACE" ]; do
-        if check_singbox && check_podkop; then
+        if check_singbox && check_podkop && check_fakeip; then
             log "startup readiness confirmed after ${WAITED}s"
             return 0
         fi

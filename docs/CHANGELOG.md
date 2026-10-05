@@ -4,7 +4,7 @@
 
 Исправлено:
 - добавлен bounded startup readiness wait перед первым health cycle;
-- Monitoring ждёт готовности sing-box и runtime Podkop routing перед первой оценкой;
+- Monitoring ждёт готовности sing-box, runtime Podkop routing и FakeIP DNS перед первой оценкой;
 - ложный ранний HOME NET FAIL после reboot больше не должен фиксироваться, пока сервисы находятся в штатной boot-фазе;
 - таймаут по умолчанию 120 секунд, poll interval 5 секунд;
 - после истечения startup grace выполняется обычная оценка и реальная неисправность остаётся видимой;
