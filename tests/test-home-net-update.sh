@@ -55,7 +55,7 @@ chmod +x "$BIN/logger" "$BIN/ip" "$BIN/uci" "$BIN/curl"
 
 write_config() {
     cat > "$TMP/update.conf" <<'EOF_CONF'
-HOME_NET_UPDATE_MODE='check'
+HOME_NET_UPDATE_MODE='apply'
 HOME_NET_UPDATE_CANARY='1'
 HOME_NET_UPDATE_INTERVAL='86400'
 HOME_NET_UPDATE_JITTER='0'
@@ -224,7 +224,7 @@ case_update_available() {
 }
 
 case_no_downgrade() {
-    reset_case; write_release 1.5.2 false false; write_state 1.6.0
+    reset_case; write_release 1.5.1 false false; write_state 1.5.2
     run_updater check; assert_rc 0; assert_output 'no downgrade'
 }
 
@@ -248,6 +248,14 @@ case_non_canary_rejected() {
     sed -i "s/HOME_NET_UPDATE_CANARY='1'/HOME_NET_UPDATE_CANARY='0'/" "$TMP/update.conf"
     run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
     assert_output "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
+}
+
+case_check_mode_apply_rejected() {
+    reset_case; write_release 1.5.2 false false; write_state 1.5.1
+    sed -i "s/HOME_NET_UPDATE_MODE='apply'/HOME_NET_UPDATE_MODE='check'/" "$TMP/update.conf"
+    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_output "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
+    assert_state INSTALLED_VERSION 1.5.1
 }
 
 case_safe_update() {
@@ -325,6 +333,23 @@ case_installer_failure() {
     assert_state UPDATE_STATUS FAILED
 }
 
+case_diagnostic_installer_text() {
+    reset_case; write_release 1.5.2 false false; write_state 1.5.1
+    printf '\necho "reboot /etc/init.d/network restart"\n# reboot\n' >> "$FIXTURES/install-all.sh"
+    run_updater apply; assert_rc 0
+    assert_state ACTIVE_VERSION 1.5.2
+}
+
+case_real_installer_scanner() {
+    reset_case; write_release 1.5.2 false false; write_state 1.5.1
+    cp "$ROOT/install-all.sh" "$FIXTURES/install-all.sh"
+    # Reach payload validation, but stop before running the actual installer.
+    printf "UPDATE_ACTION_CLASS='INVALID'\n" >> "$FIXTURES/bundle.conf"
+    run_updater apply
+    [ "$RUN_RC" -ne 0 ] || exit 1
+    assert_output 'invalid or missing UPDATE_ACTION_CLASS'
+}
+
 case_forbidden_network_restart() {
     reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
     printf '\n/etc/init.d/network restart\n' >> "$FIXTURES/install-all.sh"
@@ -356,6 +381,7 @@ for test_case in \
     case_draft_rejected \
     case_prerelease_rejected \
     case_non_canary_rejected \
+    case_check_mode_apply_rejected \
     case_safe_update \
     case_controlled_success \
     case_controlled_health_fail \
@@ -364,6 +390,8 @@ for test_case in \
     case_reboot_pending_and_promoted \
     case_pending_survives_restart \
     case_installer_failure \
+    case_diagnostic_installer_text \
+    case_real_installer_scanner \
     case_forbidden_network_restart \
     case_forbidden_reboot \
     case_stale_lock

@@ -29,7 +29,7 @@ stable-release updater.** Версия ещё не опубликована ка
 Состав bundle:
 
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
-- HOME NET Monitoring: `v1.4.2`.
+- HOME NET Monitoring: `v1.4.3`.
 
 Bundle устанавливает `/usr/bin/home-net-update`, который проверяет только
 опубликованные stable GitHub Releases `home-net-cudy` и обновляет весь совместимый
@@ -87,7 +87,7 @@ Manifest `bundle.conf` фиксирует совместимую комбина�
 wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
 
-Он устанавливает проверенный Monitoring v1.4.2 из зафиксированного commit.
+Он устанавливает проверенный Monitoring v1.4.3 из зафиксированного commit.
 
 Подробности:
 

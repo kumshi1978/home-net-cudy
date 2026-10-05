@@ -50,13 +50,16 @@ Bootstrap:
 
 ## Release manifest
 
+v1.5.2 пока candidate/development, не опубликованный stable Release.
+Monitoring bootstrap и архив закреплены на одном exact commit ниже.
+
 HOME NET bundle должен хранить явные версии компонентов, например:
 
 ```text
-HOME_NET_BUNDLE_VERSION='1.5.1'
+HOME_NET_BUNDLE_VERSION='1.5.2'
 FAILOVER_VERSION='1.4.1'
-MONITORING_VERSION='1.4.2'
-MONITORING_BOOTSTRAP_REF='4815fbacca19c26892a7880101abf902c83a9f81'
+MONITORING_VERSION='1.4.3'
+MONITORING_BOOTSTRAP_REF='33a10d50846a7ff2672e399d933a532b752f4128'
 ```
 
 Bootstrap не должен устанавливать произвольный текущий `main` компонентов.
@@ -69,7 +72,7 @@ Bootstrap не должен устанавливать произвольный 
 
 Он нужен для проверки релиза на реальном оборудовании до массового rollout. Если новая версия окажется проблемной, риск ограничивается одним заранее выбранным устройством, а остальные роутеры продолжают работать на уже проверенной версии.
 
-Для HOME NET используется следующая схема:
+Для компонентного `podkop-awg-update` используется следующая схема:
 
 - canary-router — `AUTO_UPDATE_MODE='apply'`;
 - остальные Cudy — `AUTO_UPDATE_MODE='check'`;
@@ -79,6 +82,10 @@ Bootstrap не должен устанавливать произвольный 
 Canary-router не является отдельным типом оборудования: это роль, которую мы назначаем одному из обычных Cudy для безопасного поэтапного обновления.
 
 ## Политика обновлений
+
+Эти AUTO_UPDATE_MODE относятся к компонентному updater. Существующее значение
+сохраняется, если HOME_NET_AUTO_UPDATE_MODE явно не передан. Отдельный HOME NET
+updater по умолчанию check/canary=0; apply требует mode=apply и canary=1.
 
 ### По умолчанию
 
@@ -146,7 +153,7 @@ Canary-router: квартирный основной Cudy / OpenWrt 24.10.4 с `
 5. сохраняет backup конфигурации, bundle state и install metadata;
 6. запускает installer с `HOME_NET_BUNDLE_REF="$release_tag"`;
 7. ждёт новый цикл Monitoring и требует полный `STATUS=OK`;
-8. фиксирует новую bundle version только после успешного health;
+8. различает installed и active: повышает active только после успешного health;
 9. использует lock, startup delay и deterministic jitter;
 10. разрешает `apply` только при явной роли canary.
 

@@ -168,6 +168,44 @@ check_release() {
     return 0
 }
 
+reject_disruptive_actions() {
+    payload="$1"
+    label="$2"
+    # This is intentionally a small lexical guard for our own release scripts,
+    # not a general shell parser. Ignore comments and quoted diagnostic text,
+    # then require a disruptive command to appear in command position.
+    if awk '
+        BEGIN { quote = "" }
+        {
+            output = ""
+            escaped = 0
+            for (i = 1; i <= length($0); i++) {
+                char = substr($0, i, 1)
+                previous = (i > 1) ? substr($0, i - 1, 1) : ""
+
+                if (quote == "single") {
+                    if (char == sprintf("%c", 39)) quote = ""
+                    continue
+                }
+                if (quote == "double") {
+                    if (escaped) { escaped = 0; continue }
+                    if (char == "\\") { escaped = 1; continue }
+                    if (char == "\"") quote = ""
+                    continue
+                }
+
+                if (char == "#" && (i == 1 || previous ~ /[[:space:];&|()]/)) break
+                if (char == sprintf("%c", 39)) { quote = "single"; output = output " "; continue }
+                if (char == "\"") { quote = "double"; output = output " "; continue }
+                output = output char
+            }
+            print output
+        }
+    ' "$payload" | grep -Eq '(^|[;&|][;&|]?)[[:space:]]*((/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)([[:space:];&|]|$)|reboot([[:space:];&|]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot([[:space:];&|]|$)|shutdown[[:space:]].*-r([[:space:];&|]|$))'; then
+        die "$label contains an automatic network restart or reboot"
+    fi
+}
+
 download_release_payload() {
     work="$RUNTIME_DIR/$release_tag"
     mkdir -p "$work"
@@ -187,9 +225,7 @@ download_release_payload() {
     grep -Fq "HOME_NET_BUNDLE_VERSION='$release_version'" "$bundle_file" || die "bundle.conf version does not match release"
     sh -n "$installer" || die "downloaded install-all.sh failed syntax validation"
 
-    if grep -Eq '(^|[;&|[:space:]])(/etc/init\.d/network|service[[:space:]]+network)[[:space:]]+(restart|reload)|(^|[;&|[:space:]])reboot([;&|[:space:]]|$)|ubus[[:space:]]+call[[:space:]]+system[[:space:]]+reboot|shutdown[[:space:]].*-r' "$installer"; then
-        die "install-all.sh contains an automatic network restart or reboot"
-    fi
+    reject_disruptive_actions "$installer" "install-all.sh"
 
     UPDATE_ACTION_CLASS="$(sed -n "s/^UPDATE_ACTION_CLASS='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
     UPDATE_PENDING_ACTION="$(sed -n "s/^UPDATE_PENDING_ACTION='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
@@ -410,6 +446,7 @@ show_status() {
 }
 
 apply_release() {
+    [ "$MODE" = "apply" ] || die "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
     [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
 
     check_release

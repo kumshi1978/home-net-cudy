@@ -25,7 +25,9 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
     */bundle.conf) source_file="$MOCK_PAYLOADS/bundle.conf" ;;
-    */install.sh) source_file="$MOCK_PAYLOADS/monitoring-install.sh" ;;
+    */install.sh)
+        [ "$url" = "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/33a10d50846a7ff2672e399d933a532b752f4128/install.sh" ] || exit 96
+        source_file="$MOCK_PAYLOADS/monitoring-install.sh" ;;
     */scripts/home-net-update) source_file="$MOCK_PAYLOADS/home-net-update" ;;
     */init.d/home-net-update) source_file="$MOCK_PAYLOADS/home-net-update.init" ;;
     */configs/home-net-update.conf.example) source_file="$MOCK_PAYLOADS/home-net-update.conf" ;;
@@ -49,9 +51,9 @@ cat > "$PAYLOADS/bundle.conf" <<'EOF_BUNDLE'
 HOME_NET_BUNDLE_VERSION='1.5.2'
 FAILOVER_VERSION='1.4.1'
 FAILOVER_REPO='kumshi1978/openwrt-podkop-awg-failover'
-MONITORING_VERSION='1.4.2'
+MONITORING_VERSION='1.4.3'
 MONITORING_REPO='kumshi1978/home-net-cudy'
-MONITORING_BOOTSTRAP_REF='test'
+MONITORING_BOOTSTRAP_REF='33a10d50846a7ff2672e399d933a532b752f4128'
 DEFAULT_AUTO_UPDATE_MODE='check'
 UPDATE_ACTION_CLASS='SAFE'
 UPDATE_PENDING_ACTION='none'
@@ -61,6 +63,7 @@ EOF_BUNDLE
 write_monitoring_installer() {
     cat > "$PAYLOADS/monitoring-install.sh" <<'EOF_MONITORING'
 #!/bin/sh
+[ "$HOME_NET_RELEASE_REF" = '33a10d50846a7ff2672e399d933a532b752f4128' ] || exit 95
 case "${MOCK_HEALTH_MODE:-stale}" in
     stale) exit 0 ;;
     OK|UNKNOWN|FAIL|MISSING_SERVICE_CHECK)

@@ -9,6 +9,14 @@ Bundle installer сохраняет текущий `AUTO_UPDATE_MODE` компо
 если оператор явно не передал `HOME_NET_AUTO_UPDATE_MODE`. Его код и release
 channel верхнеуровневый updater не изменяет.
 
+v1.5.2 — candidate/development: Monitoring 1.4.3, failover 1.4.1.
+Bootstrap и архив Monitoring используют exact ref
+`33a10d50846a7ff2672e399d933a532b752f4128`, без moving branch.
+
+Первая установка сервиса: enable → running → start; работающий сервис получает
+restart. Во время HOME_NET_UPDATE_IN_PROGRESS=1 текущий updater не перезапускается.
+Self-update: временный файл рядом с destination → sh -n → chmod → mv.
+
 ## Файлы на роутере
 
 ```text
@@ -63,8 +71,8 @@ UPDATE_PENDING_REASON='...'
 
 Автоматически устанавливаются скрипты HOME NET, Monitoring и updater, если
 bundle не меняет runtime-версию failover. После нового Monitoring cycle и
-успешного health gate одновременно повышаются `INSTALLED_VERSION` и
-`ACTIVE_VERSION`.
+успешного health gate повышается `ACTIVE_VERSION`. Установка файлов уже
+фиксируется отдельно как `INSTALLED_VERSION`, даже если проверка не прошла.
 
 ### CONTROLLED
 
@@ -175,7 +183,7 @@ HOME_NET_UPDATE_MODE='apply'
 HOME_NET_UPDATE_CANARY='1'
 ```
 
-Без canary-флага как ручной `apply`, так и daemon в режиме `apply` завершаются
+Без mode=apply и canary=1 как ручной `apply`, так и daemon в режиме `apply` завершаются
 ошибкой до скачивания installer. Остальные роутеры остаются в `check`.
 
 После startup delay updater вычисляет стабильную задержку в пределах jitter по
