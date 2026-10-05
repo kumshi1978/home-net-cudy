@@ -1,4 +1,4 @@
-# HOME NET Monitoring v1.4.3
+# HOME NET Monitoring v1.4.4
 # Конфигурация проверки сервисов
 
 CHECK_GITHUB=1
@@ -14,3 +14,8 @@ FAKEIP_DOMAINS="github.com claude.ai gemini.google.com"
 
 FAIL_LIMIT=3
 CHECK_INTERVAL=300
+
+# Initial boot readiness wait. The daemon does not publish a FAIL state while
+# Podkop/sing-box are still starting, but it will evaluate normally after timeout.
+MONITORING_STARTUP_GRACE=120
+MONITORING_STARTUP_POLL_INTERVAL=5

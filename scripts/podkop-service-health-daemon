@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Фоновый монитор состояния Podkop / sing-box / AmneziaWG
-# Версия: 1.4.3
+# Версия: 1.4.4
 #
 # Генерирует состояние системы и передаёт обновление в event pipeline.
 
@@ -17,6 +17,8 @@ KEEP_DAYS=14
 
 [ -r "$CONF" ] && . "$CONF"
 INTERVAL="${CHECK_INTERVAL:-300}"
+STARTUP_GRACE="${MONITORING_STARTUP_GRACE:-120}"
+STARTUP_POLL_INTERVAL="${MONITORING_STARTUP_POLL_INTERVAL:-5}"
 
 mkdir -p "$LOG_DIR"
 
@@ -58,6 +60,38 @@ check_podkop() {
     nft list table inet PodkopTable >/dev/null 2>&1 || return 1
     ip rule show 2>/dev/null | grep -Eq 'lookup[[:space:]]+podkop([[:space:]]|$)' || return 1
     return 0
+}
+
+wait_for_startup_ready() {
+    case "$STARTUP_GRACE" in
+        ''|*[!0-9]*) STARTUP_GRACE=120 ;;
+    esac
+    case "$STARTUP_POLL_INTERVAL" in
+        ''|*[!0-9]*) STARTUP_POLL_INTERVAL=5 ;;
+    esac
+
+    [ "$STARTUP_GRACE" -gt 0 ] || return 0
+    [ "$STARTUP_POLL_INTERVAL" -gt 0 ] || STARTUP_POLL_INTERVAL=5
+
+    WAITED=0
+    log "startup readiness: waiting up to ${STARTUP_GRACE}s for Podkop/sing-box/FakeIP"
+
+    while [ "$WAITED" -lt "$STARTUP_GRACE" ]; do
+        if check_singbox && check_podkop && check_fakeip; then
+            log "startup readiness confirmed after ${WAITED}s"
+            return 0
+        fi
+
+        REMAIN=$((STARTUP_GRACE - WAITED))
+        SLEEP_FOR="$STARTUP_POLL_INTERVAL"
+        [ "$SLEEP_FOR" -gt "$REMAIN" ] && SLEEP_FOR="$REMAIN"
+        [ "$SLEEP_FOR" -gt 0 ] || break
+
+        sleep "$SLEEP_FOR"
+        WAITED=$((WAITED + SLEEP_FOR))
+    done
+
+    log "startup readiness timeout after ${STARTUP_GRACE}s; starting health evaluation"
 }
 
 set_unknown() {
@@ -192,6 +226,8 @@ write_daily_log() {
     FILE="$LOG_DIR/service-$DATE.log"
     { echo; echo "$(date '+%F %T')"; echo "$RESULT"; } >> "$FILE"
 }
+
+wait_for_startup_ready
 
 while true
 do

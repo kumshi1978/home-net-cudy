@@ -1,11 +1,11 @@
 #!/bin/sh
 # HOME NET Cudy
-# Bootstrap-установщик публичного релиза v1.4.3
+# Bootstrap installer for HOME NET Monitoring v1.4.4
 
 set -eu
 
 REPO="kumshi1978/home-net-cudy"
-RELEASE_REF="${HOME_NET_RELEASE_REF:-4ca7f606dfc4f1f9e8cca4b2fd7ab3158afcea00}"
+RELEASE_REF="${HOME_NET_RELEASE_REF:-aeacc81ec1ae4e90eefe6747f02b86e70d297f45}"
 TMP_DIR="/tmp/home-net-cudy-install.$$"
 ARCHIVE="$TMP_DIR/release.tar.gz"
 SRC_DIR="$TMP_DIR/src"
@@ -27,7 +27,7 @@ command -v tar >/dev/null 2>&1 || fail "tar not found"
 
 mkdir -p "$SRC_DIR"
 
-echo "HOME NET Monitoring: downloading v1.4.3 ($RELEASE_REF)"
+echo "HOME NET Monitoring: downloading v1.4.4 ($RELEASE_REF)"
 
 if command -v wget >/dev/null 2>&1; then
     wget -q -O "$ARCHIVE" "$URL" || fail "download failed: $URL"
@@ -47,7 +47,7 @@ REPO_DIR="$(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"
 [ -f "$REPO_DIR/install/install.sh" ] || fail "bundled installer not found"
 
 VERSION="$(cat "$REPO_DIR/MONITORING_VERSION")"
-[ "$VERSION" = "1.4.3" ] || fail "unexpected MONITORING_VERSION: $VERSION"
+[ "$VERSION" = "1.4.4" ] || fail "unexpected MONITORING_VERSION: $VERSION"
 echo "HOME NET Monitoring version: $VERSION"
 
 sh -n "$REPO_DIR/install/install.sh" || fail "bundled installer syntax check failed"

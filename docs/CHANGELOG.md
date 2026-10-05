@@ -1,5 +1,16 @@
 # История изменений HOME NET
 
+## v1.4.4 — HOME NET Monitoring
+
+Исправлено:
+- добавлен bounded startup readiness wait перед первым health cycle;
+- Monitoring ждёт готовности sing-box, runtime Podkop routing и FakeIP DNS перед первой оценкой;
+- ложный ранний HOME NET FAIL после reboot больше не должен фиксироваться, пока сервисы находятся в штатной boot-фазе;
+- таймаут по умолчанию 120 секунд, poll interval 5 секунд;
+- после истечения startup grace выполняется обычная оценка и реальная неисправность остаётся видимой;
+- параметры можно переопределить через MONITORING_STARTUP_GRACE и MONITORING_STARTUP_POLL_INTERVAL.
+
+
 ## v1.4.1 — HOME NET Monitoring
 
 Дата релиза: 2026-09-04
