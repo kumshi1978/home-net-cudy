@@ -23,24 +23,25 @@
 
 ## Текущая версия
 
-**v1.5.2 candidate/development — HOME NET unified bundle с верхнеуровневым
-stable-release updater.** Версия ещё не опубликована как stable GitHub Release.
+**Stable: v1.5.2. Development candidate: v1.5.3.**
+
+v1.5.3 обновляет Monitoring до v1.4.4 и добавляет bounded startup readiness wait перед первым health cycle, чтобы не фиксировать ложный ранний FAIL во время штатной загрузки Podkop/sing-box.
 
 Состав bundle:
 
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
-- HOME NET Monitoring: `v1.4.3`.
+- HOME NET Monitoring: `v1.4.4` в candidate v1.5.3; stable v1.5.2 содержит Monitoring v1.4.3.
 
 Bundle устанавливает `/usr/bin/home-net-update`, который проверяет только
 опубликованные stable GitHub Releases `home-net-cudy` и обновляет весь совместимый
 набор из `bundle.conf`. Компонентный `podkop-awg-update` пока сохраняется отдельно.
 
-Аппаратная проверка v1.5.1 завершена на обеих поддерживаемых ветках OpenWrt:
+Аппаратная проверка stable v1.5.2 завершена на обеих поддерживаемых ветках OpenWrt:
 
 - квартирный основной Cudy / OpenWrt 24.10.4 — PASS;
 - квартирный резервный Cudy / OpenWrt 25.12.5 — PASS.
 
-На обеих системах подтверждены единая установка HOME NET v1.5.1, Failover v1.4.1, Monitoring v1.4.2, работа Podkop/sing-box/FakeIP и итоговый `STATUS=OK`. На OpenWrt 25.12.5 дополнительно аппаратно проверены сценарии `OK / UNKNOWN / FAIL`, fail-fast и обработка HTTP 451.
+На обеих системах подтверждены HOME NET v1.5.2, Failover v1.4.1, Monitoring v1.4.3, работа Podkop/sing-box/FakeIP и итоговый `STATUS=OK`. На OpenWrt 25.12.5 дополнительно пройден reboot-test; выявленный ранний Monitoring boot-race исправляется candidate v1.5.3 / Monitoring v1.4.4.
 
 Текущая rollout-политика:
 
