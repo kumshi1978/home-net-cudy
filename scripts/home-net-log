@@ -1,0 +1,150 @@
+#!/bin/sh
+# HOME NET domain/problem observer control
+# Version: 1.5.0
+
+CONF="${HOME_NET_LOG_CONF:-/etc/home-net-log.conf}"
+LOG_DIR="${HOME_NET_LOG_DIR:-/tmp/home-net-log}"
+DOMAIN_LOG="$LOG_DIR/domains.log"
+PROBLEM_LOG="$LOG_DIR/problems.log"
+FAKEIP_FILE="$LOG_DIR/fakeip-domains.txt"
+DNS_STATE="/etc/home-net-log.dnsmasq-state"
+INIT="/etc/init.d/home-net-log"
+
+[ -r "$CONF" ] && . "$CONF"
+DOMAIN_CAPTURE="${DOMAIN_CAPTURE:-0}"
+REPORT_LIMIT="${REPORT_LIMIT:-50}"
+INCIDENT_CONTEXT_LINES="${INCIDENT_CONTEXT_LINES:-200}"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+set_conf_value() {
+    key="$1"
+    value="$2"
+    tmp="$CONF.tmp.$$"
+    if [ -r "$CONF" ]; then
+        awk -v k="$key" -v v="$value" '
+            BEGIN { done=0 }
+            $0 ~ "^" k "=" { print k "=" v; done=1; next }
+            { print }
+            END { if (!done) print k "=" v }
+        ' "$CONF" > "$tmp"
+    else
+        printf '%s=%s\n' "$key" "$value" > "$tmp"
+    fi
+    mv "$tmp" "$CONF"
+}
+
+status_cmd() {
+    current_logqueries="$(uci -q get dhcp.@dnsmasq[0].logqueries 2>/dev/null || true)"
+    [ -n "$current_logqueries" ] || current_logqueries=unset
+    echo "HOME NET logging"
+    echo "Service:        $($INIT running >/dev/null 2>&1 && echo running || echo stopped)"
+    echo "Domain capture: $DOMAIN_CAPTURE"
+    echo "Dnsmasq query:  $current_logqueries"
+    echo "Domain log:     $DOMAIN_LOG"
+    echo "Problem log:    $PROBLEM_LOG"
+}
+
+enable_cmd() {
+    [ "$(id -u)" = "0" ] || die "root is required"
+    current="$(uci -q get dhcp.@dnsmasq[0].logqueries 2>/dev/null || true)"
+    if [ ! -f "$DNS_STATE" ]; then
+        if [ -n "$current" ]; then
+            {
+                echo "ORIGINAL_SET=1"
+                printf "ORIGINAL_VALUE='%s'\n" "$current"
+            } > "$DNS_STATE"
+        else
+            echo "ORIGINAL_SET=0" > "$DNS_STATE"
+        fi
+    fi
+
+    uci set dhcp.@dnsmasq[0].logqueries='1'
+    uci commit dhcp
+    set_conf_value DOMAIN_CAPTURE 1
+    /etc/init.d/dnsmasq reload
+    $INIT restart
+    echo "Domain capture enabled."
+}
+
+disable_cmd() {
+    [ "$(id -u)" = "0" ] || die "root is required"
+    if [ -r "$DNS_STATE" ]; then
+        . "$DNS_STATE"
+        if [ "${ORIGINAL_SET:-0}" = "1" ]; then
+            uci set dhcp.@dnsmasq[0].logqueries="${ORIGINAL_VALUE:-0}"
+        else
+            uci -q delete dhcp.@dnsmasq[0].logqueries || true
+        fi
+        uci commit dhcp
+        rm -f "$DNS_STATE"
+    fi
+    set_conf_value DOMAIN_CAPTURE 0
+    /etc/init.d/dnsmasq reload
+    $INIT restart
+    echo "Domain capture disabled."
+}
+
+report_cmd() {
+    limit="${1:-$REPORT_LIMIT}"
+    case "$limit" in ''|*[!0-9]*) die "report limit must be numeric" ;; esac
+    [ -s "$DOMAIN_LOG" ] || { echo "No captured domains."; return 0; }
+    tmp="$LOG_DIR/report.$$"
+    awk -F'|' '{ count[$5]++ } END { for (d in count) print count[d], d }' "$DOMAIN_LOG" |
+        sort -nr > "$tmp"
+
+    echo "COUNT CLASS DOMAIN"
+    head -n "$limit" "$tmp" | while read -r count domain; do
+        if grep -Fxq "$domain" "$FAKEIP_FILE" 2>/dev/null; then
+            class="FAKEIP"
+        else
+            class="DIRECT_OR_UNKNOWN"
+        fi
+        printf '%s %s %s\n' "$count" "$class" "$domain"
+    done
+    rm -f "$tmp"
+}
+
+problems_cmd() {
+    lines="${1:-100}"
+    case "$lines" in ''|*[!0-9]*) die "line count must be numeric" ;; esac
+    [ -f "$PROBLEM_LOG" ] || return 0
+    tail -n "$lines" "$PROBLEM_LOG"
+}
+
+mark_cmd() {
+    label="${1:-incident}"
+    safe="$(printf '%s' "$label" | tr -cd 'A-Za-z0-9._-' | cut -c1-48)"
+    [ -n "$safe" ] || safe=incident
+    stamp="$(date '+%Y%m%d-%H%M%S')"
+    out="$LOG_DIR/incident-$stamp-$safe.txt"
+    mkdir -p "$LOG_DIR"
+    {
+        echo "HOME NET INCIDENT"
+        echo "TIME=$(date '+%F %T')"
+        echo "LABEL=$safe"
+        echo
+        echo "===== HEALTH ====="
+        cat /tmp/podkop-service-health/state 2>/dev/null || true
+        echo
+        echo "===== RECENT PROBLEMS ====="
+        tail -n "$INCIDENT_CONTEXT_LINES" "$PROBLEM_LOG" 2>/dev/null || true
+        echo
+        echo "===== RECENT DOMAINS ====="
+        tail -n "$INCIDENT_CONTEXT_LINES" "$DOMAIN_LOG" 2>/dev/null || true
+    } > "$out"
+    echo "$out"
+}
+
+case "${1:-status}" in
+    status) status_cmd ;;
+    enable) enable_cmd ;;
+    disable) disable_cmd ;;
+    report) shift; report_cmd "${1:-}" ;;
+    problems) shift; problems_cmd "${1:-}" ;;
+    mark) shift; mark_cmd "${1:-incident}" ;;
+    *)
+        echo "Usage: $0 {status|enable|disable|report [N]|problems [N]|mark [label]}" >&2
+        exit 2
+        ;;
+esac

@@ -1,5 +1,18 @@
 # История изменений HOME NET
 
+## v1.5.0 — HOME NET Monitoring logging
+
+Добавлено:
+- пассивный problem logger для событий Monitoring/Podkop/failover/updater/dnsmasq/sing-box;
+- opt-in DNS domain capture через dnsmasq query logging;
+- классификация наблюдений FAKEIP и DIRECT_OR_UNKNOWN;
+- отчёт по наиболее частым наблюдаемым доменам;
+- manual incident snapshot с health + recent problems + recent domains;
+- подробные логи хранятся в tmpfs, без постоянной записи на flash;
+- domain capture никогда не включается автоматически при bundle update;
+- никакие domain lists и routing policy автоматически не изменяются.
+
+
 ## v1.4.4 — HOME NET Monitoring
 
 Исправлено:
