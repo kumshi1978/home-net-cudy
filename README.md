@@ -23,25 +23,25 @@
 
 ## Текущая версия
 
-**Stable: v1.5.2. Development candidate: v1.5.3.**
+**Stable: v1.5.3. Development candidate: v1.5.4.**
 
-v1.5.3 обновляет Monitoring до v1.4.4 и добавляет bounded startup readiness wait перед первым health cycle, чтобы не фиксировать ложный ранний FAIL во время штатной загрузки Podkop/sing-box.
+v1.5.4 обновляет Monitoring до v1.5.0 и добавляет безопасную основу для domain discovery и problem logging. Domain capture выключен по умолчанию и никогда не меняет Podkop policy автоматически.
 
 Состав bundle:
 
 - Failover / updater: `openwrt-podkop-awg-failover v1.4.1`;
-- HOME NET Monitoring: `v1.4.4` в candidate v1.5.3; stable v1.5.2 содержит Monitoring v1.4.3.
+- HOME NET Monitoring: `v1.5.0` в candidate v1.5.4; stable v1.5.3 содержит Monitoring v1.4.4.
 
 Bundle устанавливает `/usr/bin/home-net-update`, который проверяет только
 опубликованные stable GitHub Releases `home-net-cudy` и обновляет весь совместимый
 набор из `bundle.conf`. Компонентный `podkop-awg-update` пока сохраняется отдельно.
 
-Аппаратная проверка stable v1.5.2 завершена на обеих поддерживаемых ветках OpenWrt:
+Stable v1.5.3 подтверждён на квартирных Cudy:
 
 - квартирный основной Cudy / OpenWrt 24.10.4 — PASS;
 - квартирный резервный Cudy / OpenWrt 25.12.5 — PASS.
 
-На обеих системах подтверждены HOME NET v1.5.2, Failover v1.4.1, Monitoring v1.4.3, работа Podkop/sing-box/FakeIP и итоговый `STATUS=OK`. На OpenWrt 25.12.5 дополнительно пройден reboot-test; выявленный ранний Monitoring boot-race исправляется candidate v1.5.3 / Monitoring v1.4.4.
+На OpenWrt 25.12.5 пройден hardware/reboot test v1.5.3. На OpenWrt 24.10.4 штатный stable-release apply path 1.5.2 → 1.5.3 прошёл с итоговым `STATUS=OK`. Следующий обязательный тест — полностью unattended daemon-triggered update на v1.5.4.
 
 Текущая rollout-политика:
 
@@ -56,9 +56,9 @@ Bundle устанавливает `/usr/bin/home-net-update`, который п�
 
 ```sh
 wget -qO /tmp/home-net-install-all.sh \
-https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.2/install-all.sh
+https://raw.githubusercontent.com/kumshi1978/home-net-cudy/v1.5.3/install-all.sh
 
-HOME_NET_BUNDLE_REF=v1.5.2 \
+HOME_NET_BUNDLE_REF=v1.5.3 \
 HOME_NET_AUTO_UPDATE_MODE=check \
 sh /tmp/home-net-install-all.sh
 ```
@@ -88,7 +88,7 @@ Manifest `bundle.conf` фиксирует совместимую комбина�
 wget -qO- https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/install.sh | sh
 ```
 
-Он устанавливает проверенный Monitoring v1.4.3 из зафиксированного commit.
+Stable bootstrap устанавливает Monitoring из версии, зафиксированной в соответствующем release.
 
 Подробности:
 
