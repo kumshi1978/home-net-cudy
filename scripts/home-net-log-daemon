@@ -115,19 +115,25 @@ parse_dnsmasq() {
     [ "$DOMAIN_CAPTURE" = "1" ] || return 0
 
     case "$line" in
-        *"dnsmasq["*"]: query["*"] "*" from "*)
-            payload="${line#*: query[}"
+        *"dnsmasq["*"]:"*" query["*"] "*" from "*)
+            payload="${line#* query[}"
             qtype="${payload%%]*}"
             rest="${payload#*] }"
             domain="${rest%% from *}"
             client="${rest##* from }"
             client="${client%% *}"
+            client="${client%%/*}"
             record_domain_query "$qtype" "$domain" "$client"
             ;;
-        *"dnsmasq["*"]: reply "*" is "*|*"dnsmasq["*"]: cached "*" is "*)
-            rest="${line#*: }"
-            rest="${rest#reply }"
-            rest="${rest#cached }"
+        *"dnsmasq["*"]:"*" reply "*" is "*)
+            rest="${line#* reply }"
+            domain="${rest%% is *}"
+            address="${rest##* is }"
+            address="${address%% *}"
+            record_fakeip_domain "$domain" "$address"
+            ;;
+        *"dnsmasq["*"]:"*" cached "*" is "*)
+            rest="${line#* cached }"
             domain="${rest%% is *}"
             address="${rest##* is }"
             address="${address%% *}"
