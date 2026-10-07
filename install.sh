@@ -27,7 +27,7 @@ command -v tar >/dev/null 2>&1 || fail "tar not found"
 
 mkdir -p "$SRC_DIR"
 
-echo "HOME NET Monitoring: downloading v1.4.4 ($RELEASE_REF)"
+echo "HOME NET Monitoring: downloading v1.5.0 ($RELEASE_REF)"
 
 if command -v wget >/dev/null 2>&1; then
     wget -q -O "$ARCHIVE" "$URL" || fail "download failed: $URL"

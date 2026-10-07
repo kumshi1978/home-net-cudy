@@ -84,7 +84,11 @@ chmod 0755     /usr/bin/podkop-service-health-daemon     /usr/bin/podkop-service
 /etc/init.d/podkop-service-health restart
 
 /etc/init.d/home-net-log enable
-/etc/init.d/home-net-log restart
+if /etc/init.d/home-net-log running; then
+    /etc/init.d/home-net-log restart
+else
+    /etc/init.d/home-net-log start
+fi
 
 echo "HOME NET Podkop Monitor v1.5.0 installed"
 echo "Domain capture remains disabled until explicitly enabled."
