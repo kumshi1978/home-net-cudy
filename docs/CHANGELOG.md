@@ -1,5 +1,16 @@
 # История изменений HOME NET
 
+## v1.5.4 — HOME NET bundle validation release
+
+Назначение:
+- SAFE validation-only release без изменения компонентных версий;
+- HOME NET Monitoring остаётся 1.4.4;
+- Failover остаётся 1.4.1;
+- используется для проверки полностью unattended daemon-triggered update на основном квартирном canary-router;
+- на canary не требуется ручной запуск `home-net-update apply`;
+- успешный тест должен подтвердить полный путь: release discovery → fleet delay → backup → install → fresh health gate → Active=1.5.4.
+
+
 ## v1.4.4 — HOME NET Monitoring
 
 Исправлено:
