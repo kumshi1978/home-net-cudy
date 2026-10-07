@@ -156,6 +156,25 @@ if [ "${1:-}" = "--stdin" ]; then
     exit 0
 fi
 
-logread -f 2>/dev/null | while IFS= read -r line; do
+FIFO="$LOG_DIR/logread.$"
+LOGREAD_PID=""
+
+cleanup() {
+    [ -n "$LOGREAD_PID" ] && kill "$LOGREAD_PID" 2>/dev/null || true
+    rm -f "$FIFO"
+}
+
+trap cleanup EXIT HUP INT TERM
+
+rm -f "$FIFO"
+mkfifo "$FIFO" || {
+    log_notice "cannot create logread fifo"
+    exit 1
+}
+
+logread -f > "$FIFO" 2>/dev/null &
+LOGREAD_PID=$!
+
+while IFS= read -r line; do
     process_line "$line"
-done
+done < "$FIFO"
