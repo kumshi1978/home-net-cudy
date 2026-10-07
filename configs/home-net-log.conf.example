@@ -1,0 +1,12 @@
+# HOME NET domain/problem observer v1.5.0
+
+# Domain query collection is disabled by default. Enable explicitly with:
+# /usr/bin/home-net-log enable
+DOMAIN_CAPTURE=0
+
+# Detailed logs live in tmpfs to avoid flash wear.
+MAX_DOMAIN_LINES=10000
+MAX_PROBLEM_LINES=3000
+MAX_FAKEIP_DOMAINS=5000
+REPORT_LIMIT=50
+INCIDENT_CONTEXT_LINES=200

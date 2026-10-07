@@ -1,0 +1,161 @@
+#!/bin/sh
+# HOME NET domain/problem observer
+# Version: 1.5.0
+
+CONF="${HOME_NET_LOG_CONF:-/etc/home-net-log.conf}"
+LOG_DIR="${HOME_NET_LOG_DIR:-/tmp/home-net-log}"
+DOMAIN_LOG="$LOG_DIR/domains.log"
+PROBLEM_LOG="$LOG_DIR/problems.log"
+FAKEIP_FILE="$LOG_DIR/fakeip-domains.txt"
+TAG="home-net-log"
+
+[ -r "$CONF" ] && . "$CONF"
+
+DOMAIN_CAPTURE="${DOMAIN_CAPTURE:-0}"
+MAX_DOMAIN_LINES="${MAX_DOMAIN_LINES:-10000}"
+MAX_PROBLEM_LINES="${MAX_PROBLEM_LINES:-3000}"
+MAX_FAKEIP_DOMAINS="${MAX_FAKEIP_DOMAINS:-5000}"
+
+mkdir -p "$LOG_DIR"
+touch "$DOMAIN_LOG" "$PROBLEM_LOG" "$FAKEIP_FILE"
+
+log_notice() {
+    logger -t "$TAG" "$*"
+}
+
+trim_file() {
+    file="$1"
+    max="$2"
+    case "$max" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$max" -gt 0 ] || return 0
+    lines="$(wc -l < "$file" 2>/dev/null | tr -d ' ')"
+    case "$lines" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$lines" -le "$max" ] && return 0
+    tmp="$file.trim.$$"
+    tail -n "$max" "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+normalize_domain() {
+    printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -d '\r\n'
+}
+
+valid_domain() {
+    case "$1" in
+        ''|*[!a-z0-9._-]*|.*|*..*|*.) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+record_domain_query() {
+    qtype="$1"
+    domain="$(normalize_domain "$2")"
+    client="$3"
+    valid_domain "$domain" || return 0
+    now_epoch="$(date +%s)"
+    now_text="$(date '+%F %T')"
+    printf '%s|%s|%s|%s|%s\n' "$now_epoch" "$now_text" "$client" "$qtype" "$domain" >> "$DOMAIN_LOG"
+    trim_file "$DOMAIN_LOG" "$MAX_DOMAIN_LINES"
+}
+
+record_fakeip_domain() {
+    domain="$(normalize_domain "$1")"
+    address="$2"
+    valid_domain "$domain" || return 0
+    case "$address" in
+        198.18.*|198.19.*) ;;
+        *) return 0 ;;
+    esac
+    grep -Fxq "$domain" "$FAKEIP_FILE" 2>/dev/null || printf '%s\n' "$domain" >> "$FAKEIP_FILE"
+    trim_file "$FAKEIP_FILE" "$MAX_FAKEIP_DOMAINS"
+}
+
+record_problem() {
+    severity="$1"
+    source="$2"
+    message="$3"
+    now_epoch="$(date +%s)"
+    now_text="$(date '+%F %T')"
+    printf '%s|%s|%s|%s|%s\n' "$now_epoch" "$now_text" "$severity" "$source" "$message" >> "$PROBLEM_LOG"
+    trim_file "$PROBLEM_LOG" "$MAX_PROBLEM_LINES"
+}
+
+classify_problem() {
+    line="$1"
+    lower="$(printf '%s' "$line" | tr 'A-Z' 'a-z')"
+
+    case "$lower" in
+        *"home net fail"*|*"fakeip check failed"*|*"sing-box check failed"*|*"podkop nft/ip rule check failed"*|*"vpn bypass detected"*|*"fatal"*|*"servfail"*|*"bundle installer failed"*|*"activation health failed"*)
+            printf 'ERROR'
+            return 0
+            ;;
+        *"home net unknown"*|*" check unknown"*|*"main check failed"*|*"backup check failed"*|*"provider "*" failed"*|*"timeout"*|*"timed out"*|*"nxdomain"*|*"refused"*|*"missing fakeip"*|*"rate limit"*)
+            printf 'WARN'
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+source_tag() {
+    line="$1"
+    case "$line" in
+        *"podkop-service-health:"*) printf 'monitoring' ;;
+        *"podkop-awg:"*) printf 'failover' ;;
+        *"podkop-health:"*) printf 'health' ;;
+        *"home-net-update"*) printf 'updater' ;;
+        *"sing-box"*) printf 'sing-box' ;;
+        *"dnsmasq"*) printf 'dnsmasq' ;;
+        *"podkop:"*) printf 'podkop' ;;
+        *) printf 'system' ;;
+    esac
+}
+
+parse_dnsmasq() {
+    line="$1"
+    [ "$DOMAIN_CAPTURE" = "1" ] || return 0
+
+    case "$line" in
+        *"dnsmasq["*"]: query["*"] "*" from "*)
+            payload="${line#*: query[}"
+            qtype="${payload%%]*}"
+            rest="${payload#*] }"
+            domain="${rest%% from *}"
+            client="${rest##* from }"
+            client="${client%% *}"
+            record_domain_query "$qtype" "$domain" "$client"
+            ;;
+        *"dnsmasq["*"]: reply "*" is "*|*"dnsmasq["*"]: cached "*" is "*)
+            rest="${line#*: }"
+            rest="${rest#reply }"
+            rest="${rest#cached }"
+            domain="${rest%% is *}"
+            address="${rest##* is }"
+            address="${address%% *}"
+            record_fakeip_domain "$domain" "$address"
+            ;;
+    esac
+}
+
+process_line() {
+    line="$1"
+    parse_dnsmasq "$line"
+
+    severity="$(classify_problem "$line" 2>/dev/null || true)"
+    [ -n "$severity" ] || return 0
+    source="$(source_tag "$line")"
+    message="${line#*: }"
+    record_problem "$severity" "$source" "$message"
+}
+
+log_notice "observer started domain_capture=$DOMAIN_CAPTURE"
+
+if [ "${1:-}" = "--stdin" ]; then
+    while IFS= read -r line; do
+        process_line "$line"
+    done
+    exit 0
+fi
+
+logread -f 2>/dev/null | while IFS= read -r line; do
+    process_line "$line"
+done
