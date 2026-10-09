@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.5.0
+# Version: 1.6.0
 
 set -e
 
@@ -21,7 +21,7 @@ INIT_SRC="$BASE_DIR/../init.d/podkop-service-health"
 
 LOG_DAEMON_SRC="$BASE_DIR/../scripts/home-net-log-daemon"
 LOG_CLI_SRC="$BASE_DIR/../scripts/home-net-log"
-LOG_INIT_SRC="$BASE_DIR/../init.d/home-net-log"
+LOG_INIT_SRC="$BASE_DIR/../init.d/home-net-log"\n\nSTATUS_SRC="$BASE_DIR/../scripts/home-net-status"\nCONTROL_SRC="$BASE_DIR/../scripts/home-net-control"\nLUCI_VIEW_SRC="$BASE_DIR/../luci/view/home-net/status.js"\nLUCI_MENU_SRC="$BASE_DIR/../luci/menu.d/luci-app-home-net.json"\nLUCI_ACL_SRC="$BASE_DIR/../luci/acl.d/luci-app-home-net.json"
 
 fail() {
     echo "ERROR: $*" >&2
@@ -34,12 +34,12 @@ check_file() {
     [ -f "$1" ] || fail "missing file $1"
 }
 
-for FILE in     "$DAEMON_SRC"     "$CHECK_SRC"     "$FAKEIP_SRC"     "$EVENT_MONITOR_SRC"     "$EVENT_RUNNER_SRC"     "$COUNTRY_LOOKUP_SRC"     "$INIT_SRC"     "$CONF_SRC"     "$LOG_DAEMON_SRC"     "$LOG_CLI_SRC"     "$LOG_INIT_SRC"     "$LOG_CONF_SRC"
+for FILE in     "$DAEMON_SRC"     "$CHECK_SRC"     "$FAKEIP_SRC"     "$EVENT_MONITOR_SRC"     "$EVENT_RUNNER_SRC"     "$COUNTRY_LOOKUP_SRC"     "$INIT_SRC"     "$CONF_SRC"     "$LOG_DAEMON_SRC"     "$LOG_CLI_SRC"     "$LOG_INIT_SRC"     "$LOG_CONF_SRC"     "$STATUS_SRC"     "$CONTROL_SRC"     "$LUCI_VIEW_SRC"     "$LUCI_MENU_SRC"     "$LUCI_ACL_SRC"
 do
     check_file "$FILE"
 done
 
-for FILE in     "$DAEMON_SRC"     "$CHECK_SRC"     "$FAKEIP_SRC"     "$EVENT_MONITOR_SRC"     "$EVENT_RUNNER_SRC"     "$COUNTRY_LOOKUP_SRC"     "$LOG_DAEMON_SRC"     "$LOG_CLI_SRC"     "$INIT_SRC"     "$LOG_INIT_SRC"
+for FILE in     "$DAEMON_SRC"     "$CHECK_SRC"     "$FAKEIP_SRC"     "$EVENT_MONITOR_SRC"     "$EVENT_RUNNER_SRC"     "$COUNTRY_LOOKUP_SRC"     "$LOG_DAEMON_SRC"     "$LOG_CLI_SRC"     "$STATUS_SRC"     "$CONTROL_SRC"     "$INIT_SRC"     "$LOG_INIT_SRC"
 do
     sh -n "$FILE"
 done
@@ -47,7 +47,7 @@ done
 BACKUP_DIR="/root/backup-podkop-install"
 mkdir -p "$BACKUP_DIR"
 
-for FILE in     /usr/bin/podkop-service-health-daemon     /usr/bin/podkop-service-check     /usr/bin/podkop-fakeip-check     /usr/bin/podkop-event-monitor     /usr/bin/podkop-event-runner     /usr/bin/podkop-country-lookup     /usr/bin/home-net-log-daemon     /usr/bin/home-net-log     /etc/init.d/podkop-service-health     /etc/init.d/home-net-log     "$CONF_DST"     "$LOG_CONF_DST"
+for FILE in     /usr/bin/podkop-service-health-daemon     /usr/bin/podkop-service-check     /usr/bin/podkop-fakeip-check     /usr/bin/podkop-event-monitor     /usr/bin/podkop-event-runner     /usr/bin/podkop-country-lookup     /usr/bin/home-net-log-daemon     /usr/bin/home-net-log     /usr/bin/home-net-status     /usr/bin/home-net-control     /www/luci-static/resources/view/home-net/status.js     /usr/share/luci/menu.d/luci-app-home-net.json     /usr/share/rpcd/acl.d/luci-app-home-net.json     /etc/init.d/podkop-service-health     /etc/init.d/home-net-log     "$CONF_DST"     "$LOG_CONF_DST"
 do
     [ -f "$FILE" ] && cp -p "$FILE" "$BACKUP_DIR/"
 done
@@ -62,7 +62,7 @@ cp "$INIT_SRC" /etc/init.d/podkop-service-health
 
 cp "$LOG_DAEMON_SRC" /usr/bin/home-net-log-daemon
 cp "$LOG_CLI_SRC" /usr/bin/home-net-log
-cp "$LOG_INIT_SRC" /etc/init.d/home-net-log
+cp "$LOG_INIT_SRC" /etc/init.d/home-net-log\n\nmkdir -p /www/luci-static/resources/view/home-net /usr/share/luci/menu.d /usr/share/rpcd/acl.d\ncp "$STATUS_SRC" /usr/bin/home-net-status\ncp "$CONTROL_SRC" /usr/bin/home-net-control\ncp "$LUCI_VIEW_SRC" /www/luci-static/resources/view/home-net/status.js\ncp "$LUCI_MENU_SRC" /usr/share/luci/menu.d/luci-app-home-net.json\ncp "$LUCI_ACL_SRC" /usr/share/rpcd/acl.d/luci-app-home-net.json
 
 if [ ! -f "$CONF_DST" ]; then
     cp "$CONF_SRC" "$CONF_DST"
@@ -78,7 +78,7 @@ if [ ! -f "$LOG_CONF_DST" ]; then
     cp "$LOG_CONF_SRC" "$LOG_CONF_DST"
 fi
 
-chmod 0755     /usr/bin/podkop-service-health-daemon     /usr/bin/podkop-service-check     /usr/bin/podkop-fakeip-check     /usr/bin/podkop-event-monitor     /usr/bin/podkop-event-runner     /usr/bin/podkop-country-lookup     /usr/bin/home-net-log-daemon     /usr/bin/home-net-log     /etc/init.d/podkop-service-health     /etc/init.d/home-net-log
+chmod 0755     /usr/bin/podkop-service-health-daemon     /usr/bin/podkop-service-check     /usr/bin/podkop-fakeip-check     /usr/bin/podkop-event-monitor     /usr/bin/podkop-event-runner     /usr/bin/podkop-country-lookup     /usr/bin/home-net-log-daemon     /usr/bin/home-net-log     /usr/bin/home-net-status     /usr/bin/home-net-control     /etc/init.d/podkop-service-health     /etc/init.d/home-net-log
 
 /etc/init.d/podkop-service-health enable
 /etc/init.d/podkop-service-health restart
@@ -90,5 +90,5 @@ else
     /etc/init.d/home-net-log start
 fi
 
-echo "HOME NET Podkop Monitor v1.5.0 installed"
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true\nrm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true\n\necho "HOME NET Podkop Monitor v1.6.0 installed"
 echo "Domain capture remains disabled until explicitly enabled."
