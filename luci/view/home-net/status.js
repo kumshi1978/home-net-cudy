@@ -118,6 +118,15 @@ return view.extend({
                     row(_('awg_backup country'), s.AWG_BACKUP_COUNTRY),
                     row(_('awg_backup handshake'), age(s.AWG_BACKUP_HANDSHAKE_AGE))
                 ]),
+                card(_('Updates'), [
+                    row(_('Update ring'), s.UPDATE_RING),
+                    row(_('Auto-update capable'), s.AUTO_UPDATE_CAPABLE),
+                    row(_('Latest release'), s.LATEST_RELEASE),
+                    row(_('Release rollout'), s.RELEASE_ROLLOUT),
+                    row(_('Auto-apply allowed'), s.AUTO_APPLY_ALLOWED),
+                    row(_('Rollout state'), s.AUTO_APPLY_STATE),
+                    row(_('Policy status'), s.ROLLOUT_POLICY_STATUS)
+                ]),
                 card(_('Versions'), [
                     row(_('Bundle installed'), s.BUNDLE_INSTALLED),
                     row(_('Bundle active'), s.BUNDLE_ACTIVE),
