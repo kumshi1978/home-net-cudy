@@ -1,0 +1,80 @@
+#!/bin/sh
+# HOME NET LuCI status backend
+# Version: 1.6.0
+
+HEALTH_STATE="/tmp/podkop-service-health/state"
+UPDATE_STATE="/etc/home-net-update.state"
+FAILOVER_CONF="/etc/podkop-awg-failover.conf"
+PROBLEM_LOG="/tmp/home-net-log/problems.log"
+HEALTH_DIR="/tmp/podkop-service-health"
+
+state_value() {
+    key="$1"; file="$2"
+    [ -r "$file" ] || return 0
+    sed -n "s/^$key=//p" "$file" | tail -n 1 | sed "s/^'//;s/'$//"
+}
+
+health_value() {
+    state_value "$1" "$HEALTH_STATE"
+}
+
+awg_handshake_age() {
+    iface="$1"
+    now="$(date +%s)"
+    hs="$(awg show "$iface" latest-handshakes 2>/dev/null | awk 'NR==1 {print $2}')"
+    case "$hs" in ''|*[!0-9]*) echo unknown; return ;; esac
+    [ "$hs" -gt 0 ] || { echo never; return; }
+    echo $((now - hs))
+}
+
+status_cmd() {
+    echo "STATUS=$(health_value STATUS)"
+    echo "ACTIVE_VPN=$(health_value ACTIVE_VPN)"
+    echo "ACTIVE_IP=$(health_value ACTIVE_IP)"
+    echo "ACTIVE_COUNTRY=$(health_value ACTIVE_COUNTRY)"
+    echo "WAN_IP=$(health_value WAN_IP)"
+    echo "WAN_COUNTRY=$(health_value WAN_COUNTRY)"
+    echo "AWG_MAIN_COUNTRY=$(health_value AWG_MAIN_COUNTRY)"
+    echo "AWG_BACKUP_COUNTRY=$(health_value AWG_BACKUP_COUNTRY)"
+    echo "PODKOP=$(health_value PODKOP)"
+    echo "SING_BOX=$(health_value SING_BOX)"
+    echo "FAKEIP=$(health_value FAKEIP)"
+    echo "SERVICE_CHECK=$(health_value SERVICE_CHECK)"
+    echo "LAST_CHECK=$(health_value LAST_CHECK)"
+    echo "CHECK_DURATION_SEC=$(health_value CHECK_DURATION_SEC)"
+    echo "AWG_MAIN_HANDSHAKE_AGE=$(awg_handshake_age awg_main)"
+    echo "AWG_BACKUP_HANDSHAKE_AGE=$(awg_handshake_age awg_backup)"
+    echo "BUNDLE_INSTALLED=$(state_value INSTALLED_VERSION "$UPDATE_STATE")"
+    echo "BUNDLE_ACTIVE=$(state_value ACTIVE_VERSION "$UPDATE_STATE")"
+    echo "UPDATE_STATUS=$(state_value UPDATE_STATUS "$UPDATE_STATE")"
+    echo "FAILOVER_VERSION=$(state_value INSTALLED_VERSION "$FAILOVER_CONF")"
+    echo "MONITORING_VERSION=1.6.0"
+    echo "PROBLEM_COUNT=$(wc -l < "$PROBLEM_LOG" 2>/dev/null || echo 0)"
+}
+
+problems_cmd() {
+    lines="${1:-100}"
+    case "$lines" in ''|*[!0-9]*) lines=100 ;; esac
+    tail -n "$lines" "$PROBLEM_LOG" 2>/dev/null
+}
+
+events_cmd() {
+    lines="${1:-100}"
+    case "$lines" in ''|*[!0-9]*) lines=100 ;; esac
+    logread 2>/dev/null | grep -E 'podkop-awg|podkop-service-health|HOME NET' | tail -n "$lines"
+}
+
+healthlog_cmd() {
+    lines="${1:-100}"
+    case "$lines" in ''|*[!0-9]*) lines=100 ;; esac
+    latest="$(ls -1 "$HEALTH_DIR"/service-*.log 2>/dev/null | tail -n 1)"
+    [ -n "$latest" ] && tail -n "$lines" "$latest"
+}
+
+case "${1:-status}" in
+    status) status_cmd ;;
+    problems) shift; problems_cmd "${1:-100}" ;;
+    events) shift; events_cmd "${1:-100}" ;;
+    healthlog) shift; healthlog_cmd "${1:-100}" ;;
+    *) echo "Usage: $0 {status|problems [N]|events [N]|healthlog [N]}" >&2; exit 2 ;;
+esac
