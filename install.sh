@@ -5,7 +5,7 @@
 set -eu
 
 REPO="kumshi1978/home-net-cudy"
-RELEASE_REF="${HOME_NET_RELEASE_REF:-af71a5a027e902d95ee2a307e90e0aac34c7a12d}"
+RELEASE_REF="${HOME_NET_RELEASE_REF:-736798dbb673d76e220e6a5b9aa47dfdfa8f01f1}"
 TMP_DIR="/tmp/home-net-cudy-install.$$"
 ARCHIVE="$TMP_DIR/release.tar.gz"
 SRC_DIR="$TMP_DIR/src"
@@ -27,7 +27,7 @@ command -v tar >/dev/null 2>&1 || fail "tar not found"
 
 mkdir -p "$SRC_DIR"
 
-echo "HOME NET Monitoring: downloading v1.5.0 ($RELEASE_REF)"
+echo "HOME NET Monitoring: downloading v1.6.0 ($RELEASE_REF)"
 
 if command -v wget >/dev/null 2>&1; then
     wget -q -O "$ARCHIVE" "$URL" || fail "download failed: $URL"
