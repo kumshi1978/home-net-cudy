@@ -154,37 +154,96 @@ Moving-ветка `main` updater-ом не используется.
 /usr/bin/home-net-update daemon
 ```
 
-## Конфигурация
+## Конфигурация и rollout rings
 
-Значения по умолчанию:
+Новая локальная модель хранит способность к автоматическому обновлению и
+постоянную роль роутера:
 
 ```text
-HOME_NET_UPDATE_MODE='check'
-HOME_NET_UPDATE_CANARY='0'
-HOME_NET_UPDATE_INTERVAL='86400'
-HOME_NET_UPDATE_JITTER='21600'
-HOME_NET_UPDATE_STARTUP_DELAY='300'
-HOME_NET_UPDATE_COMMAND_TIMEOUT='120'
-HOME_NET_UPDATE_HEALTH_TIMEOUT='600'
-HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='10'
-HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES='3'
+HOME_NET_AUTO_UPDATE_CAPABLE='1'
+HOME_NET_ROLLOUT_RING='canary|stable'
+HOME_NET_ROLLOUT_POLICY_URL='https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/rollout-policy.conf'
 ```
+
+Целевая раскладка:
+
+- квартира backup Cudy — `canary`;
+- квартира main Cudy — `stable`;
+- дача main Cudy — `stable`;
+- дача backup Cudy — `stable`.
+
+Все четыре Cudy могут иметь `HOME_NET_AUTO_UPDATE_CAPABLE='1'`. Решение о
+конкретном release принимает централизованная mutable policy:
+
+```text
+POLICY_SCHEMA='1'
+RELEASE_TAG='vX.Y.Z'
+ROLLOUT='manual|canary|fleet'
+```
+
+Смысл policy:
+
+- `manual` — automatic apply запрещён всем;
+- `canary` — automatic apply разрешён только ring=`canary`;
+- `fleet` — automatic apply разрешён ring=`canary` и ring=`stable`.
+
+Один immutable release/tag можно последовательно продвинуть
+`manual -> canary -> fleet`, меняя только policy, без нового release.
+
+### Fail-closed
+
+Mutable policy никогда не выполняется как shell. Updater не делает `source`
+этого файла и принимает только три известных поля с допустимыми значениями.
+Недоступная policy, неизвестное поле, невалидное значение или несовпадение
+`RELEASE_TAG` с latest stable release запрещают automatic apply.
+
+Rollout policy не может обойти:
+
+- update lock;
+- preflight;
+- backup;
+- action class;
+- post-update health verification;
+- запрет автоматического disruptive activation для CRITICAL.
+
+CRITICAL release при разрешённом rollout может автоматически установить только
+безопасную staging-часть. Reboot/network activation остаются
+`PENDING_APPLY`.
+
+### Состояния rollout
+
+Updater сохраняет runtime cache в:
+
+```text
+/tmp/home-net-update/rollout.state
+```
+
+Он содержит latest release, rollout, policy status и итоговый gate. Для UI
+используются понятные состояния:
+
+- `WAITING FOR CANARY` — release ещё в manual;
+- `WAITING FOR FLEET` — release открыт canary, но этот router ring=stable;
+- `AUTO APPLY ALLOWED` — policy разрешает auto-apply этому router;
+- `POLICY BLOCKED` — policy недоступна/невалидна/не соответствует release;
+- `AUTO UPDATE DISABLED` — локальная capability выключена.
+
+### Обратная совместимость и миграция
+
+`HOME_NET_UPDATE_MODE` и `HOME_NET_UPDATE_CANARY` сохраняются. Если оба новых
+ключа отсутствуют, updater работает в legacy-режиме с прежней семантикой:
+`mode=apply + canary=1` для автоматического apply. Это позволяет обновить код
+updater без неожиданного изменения поведения существующих Cudy.
+
+Миграция выполняется явным добавлением новых ключей в локальный config. Роль
+роутера не выводится автоматически из hostname или старого canary-флага, потому
+что постоянный canary теперь переносится на квартирный backup Cudy.
+
+В новой модели ручной `home-net-update apply` считается явным действием
+оператора и не зависит от release rollout policy. При этом lock, backup,
+action-class ограничения, preflight и health gates остаются обязательными.
 
 Существующий `/etc/home-net-update.conf` при повторной установке не
 перезаписывается.
-
-## Canary и fleet rollout
-
-Автоматический `apply` сначала разрешается только на одном canary-router. Для
-этого в его конфигурации должны одновременно присутствовать:
-
-```text
-HOME_NET_UPDATE_MODE='apply'
-HOME_NET_UPDATE_CANARY='1'
-```
-
-Без mode=apply и canary=1 как ручной `apply`, так и daemon в режиме `apply` завершаются
-ошибкой до скачивания installer. Остальные роутеры остаются в `check`.
 
 После startup delay updater вычисляет стабильную задержку в пределах jitter по
 первым hex-цифрам `/etc/machine-id`, а при его отсутствии — по MAC `eth0`.
