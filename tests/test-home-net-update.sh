@@ -438,6 +438,22 @@ EOF_BAD
     grep -Fq "POLICY_STATUS='INVALID'" "$TMP/runtime/rollout.state"
 }
 
+case_rollout_policy_unavailable_fails_closed() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    rm -f "$FIXTURES/rollout-policy.conf"
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    grep -Fq "POLICY_STATUS='UNAVAILABLE'" "$TMP/runtime/rollout.state"
+    grep -Fq "AUTO_APPLY_ALLOWED='0'" "$TMP/runtime/rollout.state"
+}
+
+case_check_refreshes_rollout_cache() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
+    run_updater check; assert_rc 0
+    grep -Fq "LATEST_RELEASE='v1.5.2'" "$TMP/runtime/rollout.state"
+    grep -Fq "RELEASE_ROLLOUT='canary'" "$TMP/runtime/rollout.state"
+}
+
 case_new_model_manual_apply_ignores_rollout() {
     reset_case; enable_new_model
     sed -i "s/HOME_NET_UPDATE_MODE='apply'/HOME_NET_UPDATE_MODE='check'/" "$TMP/update.conf"
@@ -481,6 +497,8 @@ for test_case in \
     case_rollout_fleet_allows_stable \
     case_rollout_policy_mismatch_fails_closed \
     case_rollout_policy_invalid_fails_closed \
+    case_rollout_policy_unavailable_fails_closed \
+    case_check_refreshes_rollout_cache \
     case_new_model_manual_apply_ignores_rollout \
     case_stale_lock
 do
