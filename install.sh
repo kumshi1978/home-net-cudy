@@ -1,6 +1,6 @@
 #!/bin/sh
 # HOME NET Cudy
-# Bootstrap installer for HOME NET Monitoring v1.5.0
+# Bootstrap installer for HOME NET Monitoring v1.6.0
 
 set -eu
 
@@ -47,7 +47,7 @@ REPO_DIR="$(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"
 [ -f "$REPO_DIR/install/install.sh" ] || fail "bundled installer not found"
 
 VERSION="$(cat "$REPO_DIR/MONITORING_VERSION")"
-[ "$VERSION" = "1.5.0" ] || fail "unexpected MONITORING_VERSION: $VERSION"
+[ "$VERSION" = "1.6.0" ] || fail "unexpected MONITORING_VERSION: $VERSION"
 echo "HOME NET Monitoring version: $VERSION"
 
 sh -n "$REPO_DIR/install/install.sh" || fail "bundled installer syntax check failed"
