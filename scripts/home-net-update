@@ -237,7 +237,9 @@ fetch_rollout_policy() {
     AUTO_APPLY_ALLOWED=0
     AUTO_APPLY_STATE='POLICY BLOCKED'
 
-    if ! bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL         --connect-timeout 10 --max-time "$COMMAND_TIMEOUT"         "$ROLLOUT_POLICY_URL" -o "$policy_file"; then
+    if ! bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL \
+        --connect-timeout 10 --max-time "$COMMAND_TIMEOUT" \
+        "$ROLLOUT_POLICY_URL" -o "$policy_file"; then
         write_rollout_cache
         log "rollout policy unavailable; automatic apply denied"
         return 1
