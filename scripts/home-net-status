@@ -4,6 +4,8 @@
 
 HEALTH_STATE="/tmp/podkop-service-health/state"
 UPDATE_STATE="/etc/home-net-update.state"
+UPDATE_CONF="/etc/home-net-update.conf"
+ROLLOUT_STATE="/tmp/home-net-update/rollout.state"
 FAILOVER_CONF="/etc/podkop-awg-failover.conf"
 PROBLEM_LOG="/tmp/home-net-log/problems.log"
 HEALTH_DIR="/tmp/podkop-service-health"
@@ -27,7 +29,26 @@ awg_handshake_age() {
     echo $((now - hs))
 }
 
+update_local_value() {
+    key="$1"
+    state_value "$key" "$UPDATE_CONF"
+}
+
+rollout_local_model() {
+    capable="$(update_local_value HOME_NET_AUTO_UPDATE_CAPABLE)"
+    ring="$(update_local_value HOME_NET_ROLLOUT_RING)"
+    if [ -z "$capable" ] && [ -z "$ring" ]; then
+        legacy_mode="$(update_local_value HOME_NET_UPDATE_MODE)"
+        legacy_canary="$(update_local_value HOME_NET_UPDATE_CANARY)"
+        [ "$legacy_mode" = "apply" ] && capable=1 || capable=0
+        [ "$legacy_canary" = "1" ] && ring=canary || ring=stable
+    fi
+    [ -n "$capable" ] || capable=0
+    [ -n "$ring" ] || ring=stable
+}
+
 status_cmd() {
+    rollout_local_model
     echo "STATUS=$(health_value STATUS)"
     echo "ACTIVE_VPN=$(health_value ACTIVE_VPN)"
     echo "ACTIVE_IP=$(health_value ACTIVE_IP)"
@@ -47,6 +68,13 @@ status_cmd() {
     echo "BUNDLE_INSTALLED=$(state_value INSTALLED_VERSION "$UPDATE_STATE")"
     echo "BUNDLE_ACTIVE=$(state_value ACTIVE_VERSION "$UPDATE_STATE")"
     echo "UPDATE_STATUS=$(state_value UPDATE_STATUS "$UPDATE_STATE")"
+    echo "UPDATE_RING=$ring"
+    echo "AUTO_UPDATE_CAPABLE=$capable"
+    echo "LATEST_RELEASE=$(state_value LATEST_RELEASE "$ROLLOUT_STATE")"
+    echo "RELEASE_ROLLOUT=$(state_value RELEASE_ROLLOUT "$ROLLOUT_STATE")"
+    echo "AUTO_APPLY_ALLOWED=$(state_value AUTO_APPLY_ALLOWED "$ROLLOUT_STATE")"
+    echo "AUTO_APPLY_STATE=$(state_value AUTO_APPLY_STATE "$ROLLOUT_STATE")"
+    echo "ROLLOUT_POLICY_STATUS=$(state_value POLICY_STATUS "$ROLLOUT_STATE")"
     echo "FAILOVER_VERSION=$(state_value INSTALLED_VERSION "$FAILOVER_CONF")"
     echo "MONITORING_VERSION=1.6.0"
     echo "PROBLEM_COUNT=$(wc -l < "$PROBLEM_LOG" 2>/dev/null || echo 0)"
