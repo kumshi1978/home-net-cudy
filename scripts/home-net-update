@@ -191,7 +191,7 @@ check_release() {
 
 write_rollout_cache() {
     mkdir -p "$RUNTIME_DIR"
-    cache_tmp="$ROLLOUT_CACHE.tmp.$"
+    cache_tmp="$ROLLOUT_CACHE.tmp.$$"
     {
         printf "LATEST_RELEASE='%s'\n" "${release_tag:-unknown}"
         printf "RELEASE_ROLLOUT='%s'\n" "$RELEASE_ROLLOUT"
