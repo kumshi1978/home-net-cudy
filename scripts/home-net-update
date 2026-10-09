@@ -19,6 +19,26 @@ RAW_URL=${HOME_NET_UPDATE_RAW_URL:-https://raw.githubusercontent.com/$REPO}
 
 MODE=${HOME_NET_UPDATE_MODE:-check}
 CANARY=${HOME_NET_UPDATE_CANARY:-0}
+
+# New rollout model. If both new keys are absent, keep legacy semantics exactly.
+ROLLOUT_MODEL=1
+if [ -z "${HOME_NET_AUTO_UPDATE_CAPABLE+x}" ] && [ -z "${HOME_NET_ROLLOUT_RING+x}" ]; then
+    ROLLOUT_MODEL=0
+fi
+if [ "$ROLLOUT_MODEL" = "1" ]; then
+    AUTO_UPDATE_CAPABLE=${HOME_NET_AUTO_UPDATE_CAPABLE:-0}
+    ROLLOUT_RING=${HOME_NET_ROLLOUT_RING:-stable}
+else
+    [ "$MODE" = "apply" ] && AUTO_UPDATE_CAPABLE=1 || AUTO_UPDATE_CAPABLE=0
+    [ "$CANARY" = "1" ] && ROLLOUT_RING=canary || ROLLOUT_RING=stable
+fi
+ROLLOUT_POLICY_URL=${HOME_NET_ROLLOUT_POLICY_URL:-https://raw.githubusercontent.com/$REPO/main/rollout-policy.conf}
+ROLLOUT_CACHE="$RUNTIME_DIR/rollout.state"
+POLICY_STATUS=UNKNOWN
+RELEASE_ROLLOUT=unknown
+AUTO_APPLY_ALLOWED=0
+AUTO_APPLY_STATE='POLICY UNKNOWN'
+
 INTERVAL=${HOME_NET_UPDATE_INTERVAL:-86400}
 JITTER=${HOME_NET_UPDATE_JITTER:-21600}
 STARTUP_DELAY=${HOME_NET_UPDATE_STARTUP_DELAY:-300}
@@ -166,6 +186,135 @@ check_release() {
         log "installed HOME NET bundle $current is the latest stable release"
     fi
     return 0
+}
+
+
+write_rollout_cache() {
+    mkdir -p "$RUNTIME_DIR"
+    cache_tmp="$ROLLOUT_CACHE.tmp.$"
+    {
+        printf "LATEST_RELEASE='%s'\n" "${release_tag:-unknown}"
+        printf "RELEASE_ROLLOUT='%s'\n" "$RELEASE_ROLLOUT"
+        printf "POLICY_STATUS='%s'\n" "$POLICY_STATUS"
+        printf "AUTO_APPLY_ALLOWED='%s'\n" "$AUTO_APPLY_ALLOWED"
+        printf "AUTO_APPLY_STATE='%s'\n" "$AUTO_APPLY_STATE"
+        printf "ROLLOUT_RING='%s'\n" "$ROLLOUT_RING"
+        printf "AUTO_UPDATE_CAPABLE='%s'\n" "$AUTO_UPDATE_CAPABLE"
+        printf "CHECKED_AT='%s'\n" "$(date '+%F %T')"
+    } > "$cache_tmp"
+    chmod 0600 "$cache_tmp"
+    mv "$cache_tmp" "$ROLLOUT_CACHE"
+}
+
+set_rollout_wait_state() {
+    AUTO_APPLY_ALLOWED=0
+    case "$RELEASE_ROLLOUT" in
+        manual) AUTO_APPLY_STATE='WAITING FOR CANARY' ;;
+        canary)
+            if [ "$ROLLOUT_RING" = "canary" ]; then
+                AUTO_APPLY_STATE='AUTO APPLY ALLOWED'
+                AUTO_APPLY_ALLOWED=1
+            else
+                AUTO_APPLY_STATE='WAITING FOR FLEET'
+            fi
+            ;;
+        fleet)
+            AUTO_APPLY_STATE='AUTO APPLY ALLOWED'
+            AUTO_APPLY_ALLOWED=1
+            ;;
+        *) AUTO_APPLY_STATE='POLICY BLOCKED' ;;
+    esac
+    if [ "$AUTO_UPDATE_CAPABLE" != "1" ]; then
+        AUTO_APPLY_ALLOWED=0
+        AUTO_APPLY_STATE='AUTO UPDATE DISABLED'
+    fi
+}
+
+fetch_rollout_policy() {
+    policy_file="$RUNTIME_DIR/rollout-policy.conf"
+    POLICY_STATUS=UNAVAILABLE
+    RELEASE_ROLLOUT=unknown
+    AUTO_APPLY_ALLOWED=0
+    AUTO_APPLY_STATE='POLICY BLOCKED'
+
+    if ! bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL         --connect-timeout 10 --max-time "$COMMAND_TIMEOUT"         "$ROLLOUT_POLICY_URL" -o "$policy_file"; then
+        write_rollout_cache
+        log "rollout policy unavailable; automatic apply denied"
+        return 1
+    fi
+
+    # Never source mutable remote policy. Accept only a tiny declarative format.
+    if grep -Ev '^[[:space:]]*(#.*)?$|^(POLICY_SCHEMA|RELEASE_TAG|ROLLOUT)=' "$policy_file" | grep -q .; then
+        POLICY_STATUS=INVALID
+        write_rollout_cache
+        log "rollout policy contains unsupported fields; automatic apply denied"
+        return 1
+    fi
+
+    policy_schema="$(sed -n "s/^POLICY_SCHEMA='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+    policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+    policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+
+    [ "$policy_schema" = "1" ] || {
+        POLICY_STATUS=INVALID
+        write_rollout_cache
+        log "rollout policy schema is invalid; automatic apply denied"
+        return 1
+    }
+    case "$policy_rollout" in manual|canary|fleet) ;; *)
+        POLICY_STATUS=INVALID
+        write_rollout_cache
+        log "rollout policy value is invalid; automatic apply denied"
+        return 1
+        ;;
+    esac
+    if [ "$policy_tag" != "$release_tag" ]; then
+        POLICY_STATUS=MISMATCH
+        RELEASE_ROLLOUT="$policy_rollout"
+        set_rollout_wait_state
+        AUTO_APPLY_ALLOWED=0
+        AUTO_APPLY_STATE='POLICY BLOCKED'
+        write_rollout_cache
+        log "rollout policy targets $policy_tag, latest release is $release_tag; automatic apply denied"
+        return 1
+    fi
+
+    POLICY_STATUS=OK
+    RELEASE_ROLLOUT="$policy_rollout"
+    set_rollout_wait_state
+    write_rollout_cache
+    return 0
+}
+
+automatic_release() {
+    fetch_release
+    installed_version
+
+    if ! version_gt "$release_version" "$current"; then
+        fetch_rollout_policy || true
+        if version_gt "$current" "$release_version"; then
+            log "installed HOME NET bundle $current is newer than latest stable $release_version; no downgrade"
+        else
+            log "installed HOME NET bundle $current is the latest stable release"
+        fi
+        return 0
+    fi
+
+    log "stable HOME NET update available: $current -> $release_version ($release_tag)"
+    active_version
+    fetch_rollout_policy || {
+        record_update_available
+        return 0
+    }
+
+    if [ "$AUTO_APPLY_ALLOWED" != "1" ]; then
+        record_update_available
+        log "automatic apply not allowed: ring=$ROLLOUT_RING capable=$AUTO_UPDATE_CAPABLE rollout=$RELEASE_ROLLOUT state=$AUTO_APPLY_STATE"
+        return 0
+    fi
+
+    log "automatic apply allowed: ring=$ROLLOUT_RING rollout=$RELEASE_ROLLOUT"
+    apply_fetched_release
 }
 
 reject_disruptive_actions() {
@@ -443,17 +592,24 @@ show_status() {
     printf 'Status:    %s\n' "$update_state"
     printf 'Pending:   %s\n' "$pending_state"
     printf 'Health:    %s\n' "$health_state"
+    printf 'Ring:      %s\n' "$ROLLOUT_RING"
+    printf 'Capable:   %s\n' "$AUTO_UPDATE_CAPABLE"
+    if [ -r "$ROLLOUT_CACHE" ]; then
+        printf 'Latest:    %s\n' "$(state_value LATEST_RELEASE "$ROLLOUT_CACHE")"
+        printf 'Rollout:   %s\n' "$(state_value RELEASE_ROLLOUT "$ROLLOUT_CACHE")"
+        printf 'AutoApply: %s\n' "$(state_value AUTO_APPLY_ALLOWED "$ROLLOUT_CACHE")"
+        printf 'Gate:      %s\n' "$(state_value AUTO_APPLY_STATE "$ROLLOUT_CACHE")"
+        printf 'Policy:    %s\n' "$(state_value POLICY_STATUS "$ROLLOUT_CACHE")"
+    else
+        printf 'Latest:    unknown\n'
+        printf 'Rollout:   unknown\n'
+        printf 'AutoApply: 0\n'
+        printf 'Gate:      POLICY UNKNOWN\n'
+        printf 'Policy:    UNKNOWN\n'
+    fi
 }
 
-apply_release() {
-    [ "$MODE" = "apply" ] || die "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
-    [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
-
-    check_release
-    check_rc=$?
-    [ "$check_rc" -eq 10 ] || return "$check_rc"
-
-    active_version
+apply_fetched_release() {
     download_release_payload
     create_backup
     before_last="$(health_value LAST_CHECK)"
@@ -510,6 +666,20 @@ apply_release() {
     log "stable HOME NET bundle $release_tag applied and recorded successfully"
 }
 
+apply_release() {
+    if [ "$ROLLOUT_MODEL" = "0" ]; then
+        [ "$MODE" = "apply" ] || die "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
+        [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
+    fi
+
+    check_release
+    check_rc=$?
+    [ "$check_rc" -eq 10 ] || return "$check_rc"
+    active_version
+    log "manual apply requested; rollout policy does not override explicit operator action"
+    apply_fetched_release
+}
+
 cohort_delay() {
     case "$JITTER" in ''|*[!0-9]*) printf '0'; return ;; esac
     [ "$JITTER" -gt 0 ] || { printf '0'; return; }
@@ -557,6 +727,7 @@ run_once() {
             fi
             ;;
         apply) apply_release; rc=$? ;;
+        auto) automatic_release; rc=$? ;;
         reconcile) reconcile_pending_reboot; rc=$? ;;
         *) rc=2 ;;
     esac
@@ -566,17 +737,24 @@ run_once() {
 
 daemon() {
     case "$MODE" in check|apply) ;; *) die "HOME_NET_UPDATE_MODE must be check or apply" ;; esac
-    [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
+    if [ "$ROLLOUT_MODEL" = "0" ]; then
+        [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
+        daemon_action="$MODE"
+        log_mode="legacy mode=$MODE canary=$CANARY"
+    else
+        daemon_action=auto
+        log_mode="ring=$ROLLOUT_RING capable=$AUTO_UPDATE_CAPABLE"
+    fi
 
     sleep "$STARTUP_DELAY"
     "$0" reconcile || true
     delay="$(cohort_delay)"
-    log "automatic HOME NET mode=$MODE canary=$CANARY fleet_delay=${delay}s interval=${INTERVAL}s"
+    log "automatic HOME NET $log_mode fleet_delay=${delay}s interval=${INTERVAL}s"
     sleep "$delay"
     while true; do
         rm -f "$UPDATED_MARKER"
-        if ! "$0" "$MODE"; then
-            log "automatic HOME NET $MODE run failed; next attempt follows the normal interval"
+        if ! "$0" "$daemon_action"; then
+            log "automatic HOME NET $daemon_action run failed; next attempt follows the normal interval"
         fi
         [ -f "$UPDATED_MARKER" ] && exit 0
         sleep "$INTERVAL"
@@ -585,6 +763,8 @@ daemon() {
 
 for tool in curl grep sed tr logger; do need "$tool"; done
 case "$CANARY" in 0|1) ;; *) die "HOME_NET_UPDATE_CANARY must be 0 or 1" ;; esac
+case "$AUTO_UPDATE_CAPABLE" in 0|1) ;; *) die "HOME_NET_AUTO_UPDATE_CAPABLE must be 0 or 1" ;; esac
+case "$ROLLOUT_RING" in canary|stable) ;; *) die "HOME_NET_ROLLOUT_RING must be canary or stable" ;; esac
 for number in "$INTERVAL" "$JITTER" "$STARTUP_DELAY" "$COMMAND_TIMEOUT" "$HEALTH_TIMEOUT" "$HEALTH_RETRY_INTERVAL" "$HEALTH_MAX_BAD_CYCLES"; do
     valid_uint "$number" || die "update timing values must be non-negative integers"
 done
@@ -598,5 +778,6 @@ case "${1:-}" in
     daemon) daemon ;;
     status) show_status ;;
     reconcile) run_once reconcile ;;
-    *) printf 'Usage: %s {check|apply|daemon|status}\n' "$0" >&2; exit 2 ;;
+    auto) run_once auto ;;
+    *) printf 'Usage: %s {check|apply|auto|daemon|status}\n' "$0" >&2; exit 2 ;;
 esac
