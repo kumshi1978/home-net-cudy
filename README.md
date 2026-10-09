@@ -23,7 +23,7 @@
 
 ## Текущая версия
 
-**Stable: v1.5.3. Development candidate: v1.5.4.**
+**Stable: v1.5.4. Development: PR #18, Monitoring/LuCI 1.6.0 candidate.**
 
 v1.5.4 обновляет Monitoring до v1.5.0 и добавляет безопасную основу для domain discovery и problem logging. Domain capture выключен по умолчанию и никогда не меняет Podkop policy автоматически.
 
@@ -43,11 +43,14 @@ Stable v1.5.3 подтверждён на квартирных Cudy:
 
 На OpenWrt 25.12.5 пройден hardware/reboot test v1.5.3. На OpenWrt 24.10.4 штатный stable-release apply path 1.5.2 → 1.5.3 прошёл с итоговым `STATUS=OK`. Следующий обязательный тест — полностью unattended daemon-triggered update на v1.5.4.
 
-Текущая rollout-политика:
+Целевая rollout-архитектура:
 
-- квартирный основной Cudy / OpenWrt 24.10.4 — canary-router, `AUTO_UPDATE_MODE='apply'`;
-- квартирный резервный Cudy / OpenWrt 25.12.5 — `AUTO_UPDATE_MODE='check'`;
-- дачные Cudy обновляются отдельной волной, когда будет доступ к площадке.
+- квартирный backup Cudy — постоянный ring=`canary`;
+- квартирный main Cudy — ring=`stable`;
+- оба дачных Cudy — ring=`stable`;
+- все четыре роутера могут автоматически устанавливать релизы;
+- централизованная fail-closed policy переводит один и тот же immutable release
+  через `manual -> canary -> fleet`.
 
 ## Единая установка HOME NET
 
