@@ -23,6 +23,7 @@ jobs:
           - install-all-safety
           - home-net-luci
           - candidate-packaging
+          - release-packaging
           - component-update-policy
     steps:
       - uses: actions/checkout@v4

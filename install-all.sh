@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-main}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.6.0}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -23,6 +23,14 @@ HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL="${HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTE
 HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES="${HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES:-3}"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
+valid_payload_sha() {
+    printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{40}$'
+}
+
+# Release payloads may use an exact release tag or full commit, never a branch.
+printf '%s\n' "$BUNDLE_REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$|^[0-9a-f]{40}$' \
+    || fail "HOME_NET_BUNDLE_REF must be a release tag vX.Y.Z or full commit SHA"
+
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT HUP INT TERM
 
@@ -210,6 +218,9 @@ fi
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
+valid_payload_sha "${MONITORING_BOOTSTRAP_REF:-}" || fail "MONITORING_BOOTSTRAP_REF must be a full commit SHA"
+valid_payload_sha "${HOME_NET_UPDATER_REF:-}" || fail "HOME_NET_UPDATER_REF must be a full commit SHA"
+
 case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) fail "invalid UPDATE_ACTION_CLASS in bundle.conf" ;; esac
 ACTION_CLASS="${HOME_NET_ACTION_CLASS:-$UPDATE_ACTION_CLASS}"
 [ "$ACTION_CLASS" = "$UPDATE_ACTION_CLASS" ] || fail "HOME_NET_ACTION_CLASS does not match bundle.conf"
@@ -235,9 +246,9 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
-HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/scripts/home-net-update"
-HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/init.d/home-net-update"
-HOME_NET_UPDATE_CONF_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/configs/home-net-update.conf.example"
+HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/scripts/home-net-update"
+HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/init.d/home-net-update"
+HOME_NET_UPDATE_CONF_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/configs/home-net-update.conf.example"
 
 fetch "$MONITORING_URL" "$MONITORING_INSTALL"
 fetch "$HOME_NET_UPDATE_URL" "$HOME_NET_UPDATE_SRC"
