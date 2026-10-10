@@ -9,6 +9,9 @@
 
 1. Финальный head PR прошёл HOME NET CI: self-test, updater, installer safety,
    LuCI static, candidate packaging и component update policy. Конфликтов merge нет.
+   В самом PR policy остаётся `v1.5.4/manual`. Packaging-тест допускает эту
+   baseline и будущие `v1.6.0/manual|canary|fleet`, чтобы не блокировать CI при
+   отдельно разрешённом продвижении policy после merge.
 2. После отдельно подтверждённого merge зафиксирован exact merge commit.
    `VERSION` и `HOME_NET_BUNDLE_VERSION` равны `1.6.0`; Monitoring ref существует
    и зафиксирован точным commit. Состав failover остаётся `1.4.1`.
