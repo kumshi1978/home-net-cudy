@@ -44,6 +44,7 @@ done
 
 case "$*" in
     *releases/latest*) source_file="$MOCK_FIXTURES/release.json" ;;
+    *rollout-policy.conf*) source_file="$MOCK_FIXTURES/rollout-policy.conf" ;;
     */VERSION*) source_file="$MOCK_FIXTURES/VERSION" ;;
     */bundle.conf*) source_file="$MOCK_FIXTURES/bundle.conf" ;;
     */install-all.sh*) source_file="$MOCK_FIXTURES/install-all.sh" ;;
@@ -65,6 +66,24 @@ HOME_NET_UPDATE_HEALTH_TIMEOUT='2'
 HOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='1'
 HOME_NET_UPDATE_HEALTH_MAX_BAD_CYCLES='2'
 EOF_CONF
+}
+
+enable_new_model() {
+    cat >> "$TMP/update.conf" <<'EOF_NEW'
+HOME_NET_AUTO_UPDATE_CAPABLE='1'
+HOME_NET_ROLLOUT_RING='stable'
+HOME_NET_ROLLOUT_POLICY_URL='https://mock.invalid/rollout-policy.conf'
+EOF_NEW
+}
+
+write_policy() {
+    tag="$1"
+    rollout="$2"
+    cat > "$FIXTURES/rollout-policy.conf" <<EOF_POLICY
+POLICY_SCHEMA='1'
+RELEASE_TAG='$tag'
+ROLLOUT='$rollout'
+EOF_POLICY
 }
 
 write_release() {
@@ -153,6 +172,7 @@ reset_case() {
     mkdir -p "$TMP/runtime"
     printf 'boot-one\n' > "$TMP/boot-id"
     write_config
+    write_policy v1.5.2 manual
     write_installer
     write_health OK '2000-01-01 00:00:00'
     MOCK_EXPECT_CLASS=SAFE
@@ -209,6 +229,14 @@ assert_state() {
         echo "$1 expected $2, got $actual" >&2
         exit 1
     }
+}
+
+assert_gate() {
+    grep -Fqx "AUTO_APPLY_STATE='$1'" "$TMP/runtime/rollout.state"
+    grep -Fqx "AUTO_APPLY_ALLOWED='$2'" "$TMP/runtime/rollout.state"
+    run_updater status; assert_rc 0
+    assert_output "Gate:      $1"
+    assert_output "AutoApply: $2"
 }
 
 case_no_update() {
@@ -366,6 +394,109 @@ case_forbidden_reboot() {
     assert_state ACTIVE_VERSION 1.5.1
 }
 
+case_rollout_manual_blocks_auto() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 manual; write_state 1.5.1
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'WAITING FOR CANARY' 0
+}
+
+case_rollout_canary_blocks_stable() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'WAITING FOR FLEET' 0
+}
+
+case_rollout_canary_allows_canary() {
+    reset_case; enable_new_model
+    sed -i "s/HOME_NET_ROLLOUT_RING='stable'/HOME_NET_ROLLOUT_RING='canary'/" "$TMP/update.conf"
+    write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.2
+    grep -Fq "AUTO_APPLY_ALLOWED='1'" "$TMP/runtime/rollout.state"
+    assert_gate 'AUTO APPLY ALLOWED' 1
+}
+
+case_rollout_fleet_allows_stable() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 fleet; write_state 1.5.1
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_gate 'AUTO APPLY ALLOWED' 1
+}
+
+case_rollout_policy_mismatch_fails_closed() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.1 fleet; write_state 1.5.1
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    grep -Fq "POLICY_STATUS='MISMATCH'" "$TMP/runtime/rollout.state"
+    grep -Fq "AUTO_APPLY_ALLOWED='0'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_policy_invalid_fails_closed() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    cat > "$FIXTURES/rollout-policy.conf" <<'EOF_BAD'
+POLICY_SCHEMA='1'
+RELEASE_TAG='v1.5.2'
+ROLLOUT='fleet'
+EVIL='1'
+EOF_BAD
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    grep -Fq "POLICY_STATUS='INVALID'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_policy_unavailable_fails_closed() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    rm -f "$FIXTURES/rollout-policy.conf"
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    grep -Fq "POLICY_STATUS='UNAVAILABLE'" "$TMP/runtime/rollout.state"
+    grep -Fq "AUTO_APPLY_ALLOWED='0'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_disabled_and_blocked_precedence() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 fleet; write_state 1.5.1
+    sed -i "s/HOME_NET_AUTO_UPDATE_CAPABLE='1'/HOME_NET_AUTO_UPDATE_CAPABLE='0'/" "$TMP/update.conf"
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'AUTO UPDATE DISABLED' 0
+    write_policy v1.5.1 fleet
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_status_without_cache() {
+    reset_case; enable_new_model; write_state 1.5.1
+    run_updater status; assert_rc 0
+    assert_output 'Gate:      POLICY UNKNOWN'
+    assert_output 'AutoApply: 0'
+    assert_output 'Latest:    unknown'
+    [ ! -e "$TMP/runtime/rollout.state" ]
+}
+
+case_check_refreshes_rollout_cache() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
+    run_updater check; assert_rc 0
+    grep -Fq "LATEST_RELEASE='v1.5.2'" "$TMP/runtime/rollout.state"
+    grep -Fq "RELEASE_ROLLOUT='canary'" "$TMP/runtime/rollout.state"
+}
+
+case_new_model_manual_apply_ignores_rollout() {
+    reset_case; enable_new_model
+    sed -i "s/HOME_NET_UPDATE_MODE='apply'/HOME_NET_UPDATE_MODE='check'/" "$TMP/update.conf"
+    sed -i "s/HOME_NET_UPDATE_CANARY='1'/HOME_NET_UPDATE_CANARY='0'/" "$TMP/update.conf"
+    write_release 1.5.2 false false; write_policy v1.5.2 manual; write_state 1.5.1
+    run_updater apply; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.2
+}
+
 case_stale_lock() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.2
     mkdir -p "$TMP/lock"
@@ -394,6 +525,17 @@ for test_case in \
     case_real_installer_scanner \
     case_forbidden_network_restart \
     case_forbidden_reboot \
+    case_rollout_manual_blocks_auto \
+    case_rollout_canary_blocks_stable \
+    case_rollout_canary_allows_canary \
+    case_rollout_fleet_allows_stable \
+    case_rollout_policy_mismatch_fails_closed \
+    case_rollout_policy_invalid_fails_closed \
+    case_rollout_policy_unavailable_fails_closed \
+    case_rollout_disabled_and_blocked_precedence \
+    case_rollout_status_without_cache \
+    case_check_refreshes_rollout_cache \
+    case_new_model_manual_apply_ignores_rollout \
     case_stale_lock
 do
     "$test_case"

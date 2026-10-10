@@ -1,0 +1,13 @@
+{
+  "admin/services/home-net": {
+    "title": "HOME NET",
+    "order": 15,
+    "action": {
+      "type": "view",
+      "path": "home-net/status"
+    },
+    "depends": {
+      "acl": [ "luci-app-home-net" ]
+    }
+  }
+}

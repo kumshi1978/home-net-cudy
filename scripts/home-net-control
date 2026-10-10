@@ -1,0 +1,44 @@
+#!/bin/sh
+# HOME NET LuCI limited control backend
+# Version: 1.6.0
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+switch_vpn() {
+    target="$1"
+    case "$target" in awg_main|awg_backup) ;; *) die "invalid VPN interface" ;; esac
+    ubus call "network.interface.$target" status 2>/dev/null | grep -q '"up": true' ||
+        die "$target is not up"
+    uci set podkop.main.interface="$target"
+    uci commit podkop
+    /etc/init.d/podkop restart
+    echo "Podkop switched to $target"
+}
+
+case "${1:-}" in
+    health)
+        /etc/init.d/podkop-service-health restart
+        echo "Health check restarted"
+        ;;
+    update-check)
+        /usr/bin/home-net-update check
+        ;;
+    switch-main)
+        switch_vpn awg_main
+        ;;
+    switch-backup)
+        switch_vpn awg_backup
+        ;;
+    restart-podkop)
+        /etc/init.d/podkop restart
+        echo "Podkop restarted"
+        ;;
+    restart-singbox)
+        /etc/init.d/sing-box restart
+        echo "sing-box restarted"
+        ;;
+    *)
+        echo "Usage: $0 {health|update-check|switch-main|switch-backup|restart-podkop|restart-singbox}" >&2
+        exit 2
+        ;;
+esac

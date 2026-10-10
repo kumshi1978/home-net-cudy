@@ -1,0 +1,15 @@
+{
+  "luci-app-home-net": {
+    "description": "Grant access to HOME NET monitoring and limited controls",
+    "read": {
+      "file": {
+        "/usr/bin/home-net-status": [ "exec" ]
+      }
+    },
+    "write": {
+      "file": {
+        "/usr/bin/home-net-control": [ "exec" ]
+      }
+    }
+  }
+}

@@ -1,6 +1,13 @@
-# Automatic apply is allowed only on the explicitly selected canary router.
+# HOME NET updater local capability and permanent rollout role.
+# Production target: all four Cudy capable; exactly one router uses ring=canary.
+HOME_NET_AUTO_UPDATE_CAPABLE='1'
+HOME_NET_ROLLOUT_RING='stable'
+HOME_NET_ROLLOUT_POLICY_URL='https://raw.githubusercontent.com/kumshi1978/home-net-cudy/main/rollout-policy.conf'
+
+# Legacy compatibility. Used only when both new rollout keys are absent.
 HOME_NET_UPDATE_MODE='check'
 HOME_NET_UPDATE_CANARY='0'
+
 HOME_NET_UPDATE_INTERVAL='86400'
 HOME_NET_UPDATE_JITTER='21600'
 HOME_NET_UPDATE_STARTUP_DELAY='300'

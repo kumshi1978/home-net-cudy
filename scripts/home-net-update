@@ -15,10 +15,33 @@ REPO=${HOME_NET_UPDATE_REPO:-kumshi1978/home-net-cudy}
 API_URL=${HOME_NET_UPDATE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
 RAW_URL=${HOME_NET_UPDATE_RAW_URL:-https://raw.githubusercontent.com/$REPO}
 
-[ -r "$CONF" ] && . "$CONF"
+# Offline self-test must never execute the operator's configuration.
+if [ "${1:-}" != self-test ]; then
+    [ -r "$CONF" ] && . "$CONF"
+fi
 
 MODE=${HOME_NET_UPDATE_MODE:-check}
 CANARY=${HOME_NET_UPDATE_CANARY:-0}
+
+# New rollout model. If both new keys are absent, keep legacy semantics exactly.
+ROLLOUT_MODEL=1
+if [ -z "${HOME_NET_AUTO_UPDATE_CAPABLE+x}" ] && [ -z "${HOME_NET_ROLLOUT_RING+x}" ]; then
+    ROLLOUT_MODEL=0
+fi
+if [ "$ROLLOUT_MODEL" = "1" ]; then
+    AUTO_UPDATE_CAPABLE=${HOME_NET_AUTO_UPDATE_CAPABLE:-0}
+    ROLLOUT_RING=${HOME_NET_ROLLOUT_RING:-stable}
+else
+    [ "$MODE" = "apply" ] && AUTO_UPDATE_CAPABLE=1 || AUTO_UPDATE_CAPABLE=0
+    [ "$CANARY" = "1" ] && ROLLOUT_RING=canary || ROLLOUT_RING=stable
+fi
+ROLLOUT_POLICY_URL=${HOME_NET_ROLLOUT_POLICY_URL:-https://raw.githubusercontent.com/$REPO/main/rollout-policy.conf}
+ROLLOUT_CACHE="$RUNTIME_DIR/rollout.state"
+POLICY_STATUS=UNKNOWN
+RELEASE_ROLLOUT=unknown
+AUTO_APPLY_ALLOWED=0
+AUTO_APPLY_STATE='POLICY UNKNOWN'
+
 INTERVAL=${HOME_NET_UPDATE_INTERVAL:-86400}
 JITTER=${HOME_NET_UPDATE_JITTER:-21600}
 STARTUP_DELAY=${HOME_NET_UPDATE_STARTUP_DELAY:-300}
@@ -168,6 +191,127 @@ check_release() {
     return 0
 }
 
+
+write_rollout_cache() {
+    mkdir -p "$RUNTIME_DIR"
+    cache_tmp="$ROLLOUT_CACHE.tmp.$$"
+    {
+        printf "LATEST_RELEASE='%s'\n" "${release_tag:-unknown}"
+        printf "RELEASE_ROLLOUT='%s'\n" "$RELEASE_ROLLOUT"
+        printf "POLICY_STATUS='%s'\n" "$POLICY_STATUS"
+        printf "AUTO_APPLY_ALLOWED='%s'\n" "$AUTO_APPLY_ALLOWED"
+        printf "AUTO_APPLY_STATE='%s'\n" "$AUTO_APPLY_STATE"
+        printf "ROLLOUT_RING='%s'\n" "$ROLLOUT_RING"
+        printf "AUTO_UPDATE_CAPABLE='%s'\n" "$AUTO_UPDATE_CAPABLE"
+        printf "CHECKED_AT='%s'\n" "$(date '+%F %T')"
+    } > "$cache_tmp"
+    chmod 0600 "$cache_tmp"
+    mv "$cache_tmp" "$ROLLOUT_CACHE"
+}
+
+set_rollout_wait_state() {
+    AUTO_APPLY_ALLOWED=0
+    case "$RELEASE_ROLLOUT" in
+        manual) AUTO_APPLY_STATE='WAITING FOR CANARY' ;;
+        canary)
+            if [ "$ROLLOUT_RING" = "canary" ]; then
+                AUTO_APPLY_STATE='AUTO APPLY ALLOWED'
+                AUTO_APPLY_ALLOWED=1
+            else
+                AUTO_APPLY_STATE='WAITING FOR FLEET'
+            fi
+            ;;
+        fleet)
+            AUTO_APPLY_STATE='AUTO APPLY ALLOWED'
+            AUTO_APPLY_ALLOWED=1
+            ;;
+        *) AUTO_APPLY_STATE='POLICY BLOCKED' ;;
+    esac
+    if [ "$AUTO_UPDATE_CAPABLE" != "1" ]; then
+        AUTO_APPLY_ALLOWED=0
+        AUTO_APPLY_STATE='AUTO UPDATE DISABLED'
+    fi
+}
+
+evaluate_rollout_policy() {
+    # Input: policy_file, release_tag, ROLLOUT_RING, AUTO_UPDATE_CAPABLE.
+    # Output only: rollout decision variables. No downloads or state writes.
+    POLICY_STATUS=INVALID
+    RELEASE_ROLLOUT=unknown
+    AUTO_APPLY_ALLOWED=0
+    AUTO_APPLY_STATE='POLICY BLOCKED'
+    if grep -Ev '^[[:space:]]*(#.*)?$|^(POLICY_SCHEMA|RELEASE_TAG|ROLLOUT)=' "$policy_file" | grep -q .; then
+        return 1
+    fi
+    policy_schema="$(sed -n "s/^POLICY_SCHEMA='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+    policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+    policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$policy_file" | tail -n 1)"
+    [ "$policy_schema" = 1 ] || return 1
+    case "$policy_rollout" in manual|canary|fleet) ;; *) return 1 ;; esac
+    RELEASE_ROLLOUT="$policy_rollout"
+    if [ "$policy_tag" != "$release_tag" ]; then
+        POLICY_STATUS=MISMATCH
+        return 1
+    fi
+    POLICY_STATUS=OK
+    set_rollout_wait_state
+}
+
+fetch_rollout_policy() {
+    policy_file="$RUNTIME_DIR/rollout-policy.conf"
+    POLICY_STATUS=UNAVAILABLE
+    RELEASE_ROLLOUT=unknown
+    AUTO_APPLY_ALLOWED=0
+    AUTO_APPLY_STATE='POLICY BLOCKED'
+
+    if ! bounded_run "$COMMAND_TIMEOUT" curl -4 -fsSL \
+        --connect-timeout 10 --max-time "$COMMAND_TIMEOUT" \
+        "$ROLLOUT_POLICY_URL" -o "$policy_file"; then
+        write_rollout_cache
+        log "rollout policy unavailable; automatic apply denied"
+        return 1
+    fi
+
+    if ! evaluate_rollout_policy; then
+        write_rollout_cache
+        log "rollout policy $POLICY_STATUS; automatic apply denied"
+        return 1
+    fi
+    write_rollout_cache
+    return 0
+}
+
+automatic_release() {
+    fetch_release
+    installed_version
+
+    if ! version_gt "$release_version" "$current"; then
+        fetch_rollout_policy || true
+        if version_gt "$current" "$release_version"; then
+            log "installed HOME NET bundle $current is newer than latest stable $release_version; no downgrade"
+        else
+            log "installed HOME NET bundle $current is the latest stable release"
+        fi
+        return 0
+    fi
+
+    log "stable HOME NET update available: $current -> $release_version ($release_tag)"
+    active_version
+    fetch_rollout_policy || {
+        record_update_available
+        return 0
+    }
+
+    if [ "$AUTO_APPLY_ALLOWED" != "1" ]; then
+        record_update_available
+        log "automatic apply not allowed: ring=$ROLLOUT_RING capable=$AUTO_UPDATE_CAPABLE rollout=$RELEASE_ROLLOUT state=$AUTO_APPLY_STATE"
+        return 0
+    fi
+
+    log "automatic apply allowed: ring=$ROLLOUT_RING rollout=$RELEASE_ROLLOUT"
+    apply_fetched_release
+}
+
 reject_disruptive_actions() {
     payload="$1"
     label="$2"
@@ -230,11 +374,29 @@ download_release_payload() {
     UPDATE_ACTION_CLASS="$(sed -n "s/^UPDATE_ACTION_CLASS='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
     UPDATE_PENDING_ACTION="$(sed -n "s/^UPDATE_PENDING_ACTION='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
     UPDATE_PENDING_REASON="$(sed -n "s/^UPDATE_PENDING_REASON='\([^']*\)'$/\1/p" "$bundle_file" | tail -n 1)"
-    case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) die "invalid or missing UPDATE_ACTION_CLASS" ;; esac
     [ -n "$UPDATE_PENDING_ACTION" ] || UPDATE_PENDING_ACTION=none
-    if [ "$UPDATE_ACTION_CLASS" = "CRITICAL" ] && [ "$UPDATE_PENDING_ACTION" = "none" ]; then
-        die "CRITICAL release must declare UPDATE_PENDING_ACTION"
-    fi
+    plan_update_action || die "$action_plan_error"
+}
+
+plan_update_action() {
+    # Shared activation decision; deliberately has no runtime side effects.
+    stage_only=0
+    controlled_action=0
+    activation_status=OK
+    activation_version="$release_version"
+    action_plan_error='invalid or missing UPDATE_ACTION_CLASS'
+    case "$UPDATE_ACTION_CLASS" in
+        SAFE) ;;
+        CONTROLLED) controlled_action=1 ;;
+        CRITICAL)
+            action_plan_error='CRITICAL release must declare UPDATE_PENDING_ACTION'
+            [ -n "$UPDATE_PENDING_ACTION" ] && [ "$UPDATE_PENDING_ACTION" != none ] || return 1
+            stage_only=1
+            activation_status=PENDING_APPLY
+            activation_version="$active"
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 create_backup() {
@@ -443,27 +605,32 @@ show_status() {
     printf 'Status:    %s\n' "$update_state"
     printf 'Pending:   %s\n' "$pending_state"
     printf 'Health:    %s\n' "$health_state"
+    printf 'Ring:      %s\n' "$ROLLOUT_RING"
+    printf 'Capable:   %s\n' "$AUTO_UPDATE_CAPABLE"
+    if [ -r "$ROLLOUT_CACHE" ]; then
+        printf 'Latest:    %s\n' "$(state_value LATEST_RELEASE "$ROLLOUT_CACHE")"
+        printf 'Rollout:   %s\n' "$(state_value RELEASE_ROLLOUT "$ROLLOUT_CACHE")"
+        printf 'AutoApply: %s\n' "$(state_value AUTO_APPLY_ALLOWED "$ROLLOUT_CACHE")"
+        printf 'Gate:      %s\n' "$(state_value AUTO_APPLY_STATE "$ROLLOUT_CACHE")"
+        printf 'Policy:    %s\n' "$(state_value POLICY_STATUS "$ROLLOUT_CACHE")"
+    else
+        printf 'Latest:    unknown\n'
+        printf 'Rollout:   unknown\n'
+        printf 'AutoApply: 0\n'
+        printf 'Gate:      POLICY UNKNOWN\n'
+        printf 'Policy:    UNKNOWN\n'
+    fi
 }
 
-apply_release() {
-    [ "$MODE" = "apply" ] || die "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
-    [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
-
-    check_release
-    check_rc=$?
-    [ "$check_rc" -eq 10 ] || return "$check_rc"
-
-    active_version
+apply_fetched_release() {
     download_release_payload
     create_backup
     before_last="$(health_value LAST_CHECK)"
     before_started="$(health_value CHECK_STARTED)"
 
-    case "$UPDATE_ACTION_CLASS" in
-        SAFE) stage_only=0 ;;
-        CONTROLLED) stage_only=0; begin_controlled_action ;;
-        CRITICAL) stage_only=1; log "CRITICAL activation will be staged as PENDING_APPLY" ;;
-    esac
+    plan_update_action || die "invalid update action plan"
+    [ "$controlled_action" != 1 ] || begin_controlled_action
+    [ "$stage_only" != 1 ] || log "CRITICAL activation will be staged as PENDING_APPLY"
 
     evaluate_health || true
     write_update_state "$current" "$active" INSTALLING none \
@@ -493,10 +660,10 @@ apply_release() {
         die "bundle installed but activation health failed; active version was not changed; backup: $backup"
     fi
 
-    if [ "$UPDATE_ACTION_CLASS" = "CRITICAL" ]; then
+    if [ "$activation_status" = "PENDING_APPLY" ]; then
         pending_boot=none
         [ "$UPDATE_PENDING_ACTION" = "reboot" ] && pending_boot="$(current_boot_id)"
-        write_update_state "$release_version" "$active" PENDING_APPLY \
+        write_update_state "$release_version" "$activation_version" "$activation_status" \
             "$UPDATE_PENDING_ACTION" "$UPDATE_PENDING_REASON" "$release_version" OK "$pending_boot"
         UPDATED=1
         : > "$UPDATED_MARKER"
@@ -504,10 +671,24 @@ apply_release() {
         return 0
     fi
 
-    write_update_state "$release_version" "$release_version" OK none none none OK none
+    write_update_state "$release_version" "$activation_version" "$activation_status" none none none OK none
     UPDATED=1
     : > "$UPDATED_MARKER"
     log "stable HOME NET bundle $release_tag applied and recorded successfully"
+}
+
+apply_release() {
+    if [ "$ROLLOUT_MODEL" = "0" ]; then
+        [ "$MODE" = "apply" ] || die "apply is allowed only when HOME_NET_UPDATE_MODE='apply'"
+        [ "$CANARY" = "1" ] || die "apply is allowed only when HOME_NET_UPDATE_CANARY='1'"
+    fi
+
+    check_release
+    check_rc=$?
+    [ "$check_rc" -eq 10 ] || return "$check_rc"
+    active_version
+    log "manual apply requested; rollout policy does not override explicit operator action"
+    apply_fetched_release
 }
 
 cohort_delay() {
@@ -551,12 +732,16 @@ run_once() {
         check)
             check_release
             rc=$?
+            if [ "$ROLLOUT_MODEL" = "1" ]; then
+                fetch_rollout_policy || true
+            fi
             if [ "$rc" -eq 10 ]; then
                 record_update_available
                 rc=0
             fi
             ;;
         apply) apply_release; rc=$? ;;
+        auto) automatic_release; rc=$? ;;
         reconcile) reconcile_pending_reboot; rc=$? ;;
         *) rc=2 ;;
     esac
@@ -566,25 +751,129 @@ run_once() {
 
 daemon() {
     case "$MODE" in check|apply) ;; *) die "HOME_NET_UPDATE_MODE must be check or apply" ;; esac
-    [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
+    if [ "$ROLLOUT_MODEL" = "0" ]; then
+        [ "$MODE" != "apply" ] || [ "$CANARY" = "1" ] || die "daemon apply mode requires HOME_NET_UPDATE_CANARY='1'"
+        daemon_action="$MODE"
+        log_mode="legacy mode=$MODE canary=$CANARY"
+    else
+        daemon_action=auto
+        log_mode="ring=$ROLLOUT_RING capable=$AUTO_UPDATE_CAPABLE"
+    fi
 
     sleep "$STARTUP_DELAY"
     "$0" reconcile || true
     delay="$(cohort_delay)"
-    log "automatic HOME NET mode=$MODE canary=$CANARY fleet_delay=${delay}s interval=${INTERVAL}s"
+    log "automatic HOME NET $log_mode fleet_delay=${delay}s interval=${INTERVAL}s"
     sleep "$delay"
     while true; do
         rm -f "$UPDATED_MARKER"
-        if ! "$0" "$MODE"; then
-            log "automatic HOME NET $MODE run failed; next attempt follows the normal interval"
+        if ! "$0" "$daemon_action"; then
+            log "automatic HOME NET $daemon_action run failed; next attempt follows the normal interval"
         fi
         [ -f "$UPDATED_MARKER" ] && exit 0
         sleep "$INTERVAL"
     done
 }
 
+self_test() (
+    # Subshell and private fixtures isolate every decision from real router state.
+    test_dir="$(mktemp -d "${TMPDIR:-/tmp}/home-net-self-test.XXXXXX")" || exit 1
+    trap 'rm -rf "$test_dir"' EXIT
+    trap 'exit 1' HUP INT TERM
+    PASS=0 FAIL=0
+    expect() {
+        if [ "$2" = "$3" ]; then
+            printf 'PASS: %s\n' "$1"
+            PASS=$((PASS + 1))
+        else
+            printf 'FAIL: %s (got %s, expected %s)\n' "$1" "$2" "$3"
+            FAIL=$((FAIL + 1))
+        fi
+    }
+    policy_file="$test_dir/policy"
+    release_tag=v1.6.0
+    AUTO_UPDATE_CAPABLE=1
+    for scenario in manual:canary:0 canary:canary:1 canary:stable:0 fleet:stable:1 fleet:canary:1 invalid:stable:0; do
+        rollout=${scenario%%:*}
+        rest=${scenario#*:}
+        ROLLOUT_RING=${rest%%:*}
+        expected=${rest##*:}
+        printf "POLICY_SCHEMA='1'\nRELEASE_TAG='v1.6.0'\nROLLOUT='%s'\n" "$rollout" > "$policy_file"
+        evaluate_rollout_policy || true
+        expect "$rollout/$ROLLOUT_RING auto apply" "$AUTO_APPLY_ALLOWED" "$expected"
+        if [ "$rollout" = invalid ]; then
+            expect 'invalid policy blocked' "$POLICY_STATUS" INVALID
+        fi
+    done
+    printf "POLICY_SCHEMA='1'\nRELEASE_TAG='v1.5.4'\nROLLOUT='fleet'\n" > "$policy_file"
+    evaluate_rollout_policy || true
+    expect 'release mismatch' "$POLICY_STATUS" MISMATCH
+    expect 'release mismatch blocks auto apply' "$AUTO_APPLY_ALLOWED" 0
+    printf "POLICY_SCHEMA='1'\nRELEASE_TAG='v1.6.0'\nROLLOUT='fleet'\n" > "$policy_file"
+    AUTO_UPDATE_CAPABLE=0
+    evaluate_rollout_policy || true
+    expect 'capable=0 blocks auto apply' "$AUTO_APPLY_ALLOWED" 0
+    AUTO_UPDATE_CAPABLE=1
+    printf "EVIL='1'\n" >> "$policy_file"
+    evaluate_rollout_policy || true
+    expect 'unsupported policy field blocked' "$POLICY_STATUS" INVALID
+
+    HEALTH_STATE="$test_dir/health"
+    for health in OK FAIL UNKNOWN ''; do
+        printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\n' "$health" > "$HEALTH_STATE"
+        result=0
+        evaluate_health || result=$?
+        expected=1
+        [ "$health" != OK ] || expected=0
+        expect "health ${health:-missing} gate" "$result" "$expected"
+    done
+    for self_required in PODKOP SING_BOX FAKEIP SERVICE_CHECK; do
+        printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\n' | sed "/^$self_required=/d" > "$HEALTH_STATE"
+        result=0
+        evaluate_health || result=$?
+        expect "missing $self_required blocks health" "$result" 1
+    done
+    active=1.5.4 release_version=1.6.0
+    for UPDATE_ACTION_CLASS in SAFE CONTROLLED CRITICAL; do
+        UPDATE_PENDING_ACTION=reboot
+        result=0
+        plan_update_action || result=$?
+        expect "$UPDATE_ACTION_CLASS valid" "$result" 0
+        expected=0
+        [ "$UPDATE_ACTION_CLASS" != CRITICAL ] || expected=1
+        expect "$UPDATE_ACTION_CLASS stage only" "$stage_only" "$expected"
+        expected=0
+        [ "$UPDATE_ACTION_CLASS" != CONTROLLED ] || expected=1
+        expect "$UPDATE_ACTION_CLASS controlled preflight" "$controlled_action" "$expected"
+        expected=OK expected_version=1.6.0
+        if [ "$UPDATE_ACTION_CLASS" = CRITICAL ]; then
+            expected=PENDING_APPLY expected_version=1.5.4
+        fi
+        expect "$UPDATE_ACTION_CLASS activation status" "$activation_status" "$expected"
+        expect "$UPDATE_ACTION_CLASS active version" "$activation_version" "$expected_version"
+    done
+    UPDATE_ACTION_CLASS=CRITICAL UPDATE_PENDING_ACTION=none
+    result=0
+    plan_update_action || result=$?
+    expect 'CRITICAL requires pending action' "$result" 1
+    UPDATE_ACTION_CLASS=invalid
+    result=0
+    plan_update_action || result=$?
+    expect 'invalid action class blocked' "$result" 1
+    printf 'Self-test: %s passed, %s failed\n' "$PASS" "$FAIL"
+    [ "$FAIL" -eq 0 ]
+)
+
+# Dispatch before dependencies, config validation, locking or runtime writes.
+if [ "${1:-}" = self-test ]; then
+    self_test
+    exit $?
+fi
+
 for tool in curl grep sed tr logger; do need "$tool"; done
 case "$CANARY" in 0|1) ;; *) die "HOME_NET_UPDATE_CANARY must be 0 or 1" ;; esac
+case "$AUTO_UPDATE_CAPABLE" in 0|1) ;; *) die "HOME_NET_AUTO_UPDATE_CAPABLE must be 0 or 1" ;; esac
+case "$ROLLOUT_RING" in canary|stable) ;; *) die "HOME_NET_ROLLOUT_RING must be canary or stable" ;; esac
 for number in "$INTERVAL" "$JITTER" "$STARTUP_DELAY" "$COMMAND_TIMEOUT" "$HEALTH_TIMEOUT" "$HEALTH_RETRY_INTERVAL" "$HEALTH_MAX_BAD_CYCLES"; do
     valid_uint "$number" || die "update timing values must be non-negative integers"
 done
@@ -598,5 +887,6 @@ case "${1:-}" in
     daemon) daemon ;;
     status) show_status ;;
     reconcile) run_once reconcile ;;
-    *) printf 'Usage: %s {check|apply|daemon|status}\n' "$0" >&2; exit 2 ;;
+    auto) run_once auto ;;
+    *) printf 'Usage: %s {check|apply|auto|daemon|status|self-test}\n' "$0" >&2; exit 2 ;;
 esac

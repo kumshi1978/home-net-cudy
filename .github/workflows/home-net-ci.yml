@@ -1,0 +1,40 @@
+name: HOME NET CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/luci-home-net-dashboard, main]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - home-net-update-self-test
+          - home-net-update
+          - install-all-safety
+          - home-net-luci
+          - candidate-packaging
+          - component-update-policy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Shell syntax
+        run: |
+          sh -n scripts/home-net-update
+          sh -n install-all.sh
+          sh -n "tests/test-${{ matrix.suite }}.sh"
+      - name: Offline regression tests
+        run: sh "tests/test-${{ matrix.suite }}.sh"
+      - name: Whitespace validation
+        run: git diff-tree --check HEAD^ HEAD
