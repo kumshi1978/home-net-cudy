@@ -1,5 +1,10 @@
 # HOME NET updater self-test
 
+`home-net-update self-test` доступен начиная с v1.6.0. На штатном updater v1.5.4
+команда отсутствует — это ожидаемое поведение. Candidate updater PR #18 уже
+содержит команду; версия bundle state сама по себе не определяет версию кода updater.
+Сценарий после merge: `hardware-canary-test.md`.
+
 Run `home-net-update self-test` (or `sh scripts/home-net-update self-test` from a checkout).
 Exit status is zero only when all checks pass; output includes individual PASS/FAIL
 results and a total. No downloads, installation, apply, reboot or service commands

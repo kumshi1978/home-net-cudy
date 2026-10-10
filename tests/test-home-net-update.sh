@@ -231,6 +231,14 @@ assert_state() {
     }
 }
 
+assert_gate() {
+    grep -Fqx "AUTO_APPLY_STATE='$1'" "$TMP/runtime/rollout.state"
+    grep -Fqx "AUTO_APPLY_ALLOWED='$2'" "$TMP/runtime/rollout.state"
+    run_updater status; assert_rc 0
+    assert_output "Gate:      $1"
+    assert_output "AutoApply: $2"
+}
+
 case_no_update() {
     reset_case; write_release 1.5.2 false false; write_state 1.5.2
     run_updater check; assert_rc 0; assert_output 'latest stable release'
@@ -390,14 +398,14 @@ case_rollout_manual_blocks_auto() {
     reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 manual; write_state 1.5.1
     run_updater auto; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.1
-    grep -Fq "AUTO_APPLY_STATE='WAITING FOR CANARY'" "$TMP/runtime/rollout.state"
+    assert_gate 'WAITING FOR CANARY' 0
 }
 
 case_rollout_canary_blocks_stable() {
     reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
     run_updater auto; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.1
-    grep -Fq "AUTO_APPLY_STATE='WAITING FOR FLEET'" "$TMP/runtime/rollout.state"
+    assert_gate 'WAITING FOR FLEET' 0
 }
 
 case_rollout_canary_allows_canary() {
@@ -408,6 +416,7 @@ case_rollout_canary_allows_canary() {
     assert_state INSTALLED_VERSION 1.5.2
     assert_state ACTIVE_VERSION 1.5.2
     grep -Fq "AUTO_APPLY_ALLOWED='1'" "$TMP/runtime/rollout.state"
+    assert_gate 'AUTO APPLY ALLOWED' 1
 }
 
 case_rollout_fleet_allows_stable() {
@@ -415,6 +424,7 @@ case_rollout_fleet_allows_stable() {
     run_updater auto; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.2
     assert_state ACTIVE_VERSION 1.5.2
+    assert_gate 'AUTO APPLY ALLOWED' 1
 }
 
 case_rollout_policy_mismatch_fails_closed() {
@@ -423,6 +433,7 @@ case_rollout_policy_mismatch_fails_closed() {
     assert_state INSTALLED_VERSION 1.5.1
     grep -Fq "POLICY_STATUS='MISMATCH'" "$TMP/runtime/rollout.state"
     grep -Fq "AUTO_APPLY_ALLOWED='0'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
 }
 
 case_rollout_policy_invalid_fails_closed() {
@@ -436,6 +447,7 @@ EOF_BAD
     run_updater auto; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.1
     grep -Fq "POLICY_STATUS='INVALID'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
 }
 
 case_rollout_policy_unavailable_fails_closed() {
@@ -445,6 +457,28 @@ case_rollout_policy_unavailable_fails_closed() {
     assert_state INSTALLED_VERSION 1.5.1
     grep -Fq "POLICY_STATUS='UNAVAILABLE'" "$TMP/runtime/rollout.state"
     grep -Fq "AUTO_APPLY_ALLOWED='0'" "$TMP/runtime/rollout.state"
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_disabled_and_blocked_precedence() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 fleet; write_state 1.5.1
+    sed -i "s/HOME_NET_AUTO_UPDATE_CAPABLE='1'/HOME_NET_AUTO_UPDATE_CAPABLE='0'/" "$TMP/update.conf"
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'AUTO UPDATE DISABLED' 0
+    write_policy v1.5.1 fleet
+    run_updater auto; assert_rc 0
+    assert_state INSTALLED_VERSION 1.5.1
+    assert_gate 'POLICY BLOCKED' 0
+}
+
+case_rollout_status_without_cache() {
+    reset_case; enable_new_model; write_state 1.5.1
+    run_updater status; assert_rc 0
+    assert_output 'Gate:      POLICY UNKNOWN'
+    assert_output 'AutoApply: 0'
+    assert_output 'Latest:    unknown'
+    [ ! -e "$TMP/runtime/rollout.state" ]
 }
 
 case_check_refreshes_rollout_cache() {
@@ -498,6 +532,8 @@ for test_case in \
     case_rollout_policy_mismatch_fails_closed \
     case_rollout_policy_invalid_fails_closed \
     case_rollout_policy_unavailable_fails_closed \
+    case_rollout_disabled_and_blocked_precedence \
+    case_rollout_status_without_cache \
     case_check_refreshes_rollout_cache \
     case_new_model_manual_apply_ignores_rollout \
     case_stale_lock
