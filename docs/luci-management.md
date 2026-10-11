@@ -130,3 +130,29 @@ manual confirmation/changed target, backup/health/lock failure, automatic CRITIC
 logs order/filter/clear/polling, VPN unknown states, and independent Podkop rollback.
 Use a local candidate/install ref containing this PR; do not install from stable v1.6.0.
 No router tests have been run by this PR preparation.
+## PR #24 hardware-canary corrections
+
+Static LuCI JS, menu and ACL files are installed with explicit 0644 permissions;
+LuCI directories use 0755, independent of the caller's umask. The installed updater
+self-test also invokes the read-only LuCI filesystem verifier. Offline self-test
+keeps its 36 isolated gate checks and does not read installed router configuration.
+
+New configs default to automatic updates disabled, check only, daily time 02:00,
+window 02:00–04:00, jitter 60 minutes. Existing configuration is preserved.
+Any time window is represented by equal 00:00 endpoints. It removes only the
+window veto: daily time, Git rollout, capability, health and CRITICAL protection
+still apply. Explicit manual Install is independent of automatic settings.
+Logs add display-only ERROR red, WARN orange, INFO/OK green and DEBUG gray lines;
+unknown severity remains neutral and text is rendered without HTML interpretation.
+
+The current Monitoring PODKOP field checks NFT/IP rules; it does not prove a live
+procd service. The installer now requires consistent running/status for Podkop and
+sing-box before replacement, and separately checks health. An inconsistent baseline
+fails before modification. Monitoring uses start for a missing procd instance and
+restart only for an existing one. Application services are not stopped or restarted
+unconditionally. If a previously running service disappears during installation,
+one start is attempted; final verification requires matching lifecycle status and
+a fresh healthy cycle within 600 seconds. Failure is explicit and retains backups.
+One-shot Podkop variants that report not-running while rules remain installed need
+separate hardware investigation; rules alone are not accepted as installation PASS.
+No real-router lifecycle recovery has been tested by this correction.

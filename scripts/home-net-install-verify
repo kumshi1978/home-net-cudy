@@ -1,0 +1,45 @@
+#!/bin/sh
+# Read-only installed files / lifecycle verification. No service control here.
+set -eu
+ROOT=${HOME_NET_VERIFY_ROOT:-}
+HEALTH=${HOME_NET_VERIFY_HEALTH:-$ROOT/tmp/podkop-service-health/state}
+fail() { echo "FAIL: $*" >&2; exit 1; }
+luci() {
+    for view in status updates logs vpn settings; do
+        file="$ROOT/www/luci-static/resources/view/home-net/$view.js"
+        [ -s "$file" ] || fail "missing LuCI view $view"
+        [ "$(stat -c '%a' "$file")" = 644 ] || fail "LuCI view $view must be 644"
+    done
+    file="$ROOT/www/luci-static/resources/home-net/common.js"
+    [ -s "$file" ] && [ "$(stat -c '%a' "$file")" = 644 ] || fail 'LuCI shared module missing or not 644'
+    for directory in "$ROOT/www/luci-static/resources/view/home-net" "$ROOT/www/luci-static/resources/home-net"; do
+        [ "$(stat -c '%a' "$directory")" = 755 ] || fail 'LuCI directory must be 755'
+    done
+    for file in "$ROOT"/www/luci-static/resources/view/home-net/*.js "$ROOT"/www/luci-static/resources/home-net/*.js; do
+        [ "$(stat -c '%a' "$file")" = 644 ] || fail "LuCI file $file must be 644"
+    done
+    echo 'PASS: installed LuCI files 644, directories 755'
+}
+services() {
+    for service in podkop sing-box; do
+        init="$ROOT/etc/init.d/$service"
+        [ -x "$init" ] || fail "missing $service init"
+        "$init" running || fail "$service is not running in procd"
+        "$init" status || fail "$service status disagrees with running"
+    done
+    echo 'PASS: Podkop and sing-box lifecycle'
+}
+health() {
+    [ -r "$HEALTH" ] || fail 'health state missing'
+    for pair in STATUS=OK PODKOP=RUNNING SING_BOX=RUNNING FAKEIP=OK SERVICE_CHECK=OK; do
+        grep -Fxq "$pair" "$HEALTH" || fail "health requires $pair"
+    done
+    echo 'PASS: health OK (lifecycle checked separately)'
+}
+case "${1:-all}" in
+    luci) luci ;;
+    services) services ;;
+    health) health ;;
+    all) luci; services; health ;;
+    *) fail 'usage: home-net-install-verify {luci|services|health|all}' ;;
+esac

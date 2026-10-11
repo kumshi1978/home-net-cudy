@@ -954,8 +954,11 @@ self_test() (
 
 # Dispatch before dependencies, config validation, locking or runtime writes.
 if [ "${1:-}" = self-test ]; then
-    self_test
-    exit $?
+    self_test || exit $?
+    if [ "$0" = /usr/bin/home-net-update ]; then
+        /usr/bin/home-net-install-verify luci || exit $?
+    fi
+    exit 0
 fi
 
 for tool in curl grep sed tr logger; do need "$tool"; done

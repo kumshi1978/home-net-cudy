@@ -1,7 +1,7 @@
 const fs=require('fs'),assert=require('assert'),path=require('path');
 const root=path.resolve(__dirname,'..');
 const calls=[],polls=[];let releaseClass='SAFE',modal;
-function E(tag,attrs,children){return {tag,attrs:attrs || {},children:Array.isArray(children)?children:[children],disabled:attrs && attrs.disabled,replaceChildren(...c){this.children=c},appendChild(c){this.children.push(c)}}}
+function E(tag,attrs,children){return {tag,attrs:attrs || {},children:Array.isArray(children)?children:[children],disabled:attrs && attrs.disabled,value:attrs && attrs.value || (tag==='select' && children[0].attrs.value),checked:attrs && attrs.checked,replaceChildren(...c){this.children=c},appendChild(c){this.children.push(c)},addEventListener(name,fn){this.attrs[name]=fn}}}
 const rpc={exec:async(bin,args)=>{calls.push({bin,args});return {code:0,stdout:args[0]==='preview'?'TARGET=v1.7.0\nCLASS='+releaseClass+'\n':args[0]==='status'?'RELEASE_ROLLOUT=fleet\nAUTO_APPLY_ALLOWED=1\nAUTO_APPLY_STATE=AUTO APPLY ALLOWED\nROLLOUT_POLICY_STATUS=OK\n':'',stderr:''}}};
 const ui={showModal:(title,children)=>{modal=E('modal',{},children)},hideModal:()=>{},addNotification:()=>{}};
 const source=fs.readFileSync(path.join(root,'luci/home-net/common.js'),'utf8');
@@ -10,7 +10,11 @@ function all(n){return !n||typeof n!=='object'?[]:[n].concat((n.children || []).
 function find(tree,label){return all(tree).find(x=>x.tag==='button' && x.children.includes(label))}
 const data=[{stdout:'BUNDLE_INSTALLED=1.6.0\nBUNDLE_ACTIVE=1.6.0\nSTATUS=OK\nUPDATE_RING=stable\nRELEASE_ROLLOUT=manual\nAUTO_APPLY_ALLOWED=0\nAUTO_APPLY_STATE=WAITING FOR CANARY\n'},{stdout:''},{stdout:'Historical FakeIP event'}];
 (async()=>{
+ assert.equal(common.logTone('ERROR failure'),'#b01f24');assert.equal(common.logTone('WARN event'),'#a85b00');assert.equal(common.logTone('INFO OK'),'#247333');assert.equal(common.logTone('DEBUG trace'),'#666666');assert.equal(common.logTone('<img src=x>'),'inherit');
  assert.equal(common.tone('OK'),'green');assert.equal(common.tone('WAITING FOR CANARY'),'yellow');assert.equal(common.tone('WAITING FOR FLEET'),'yellow');assert.equal(common.tone('FAILED'),'red');assert.equal(common.tone('VERIFYING'),'blue');assert.equal(common.tone('UNKNOWN'),'yellow');
+ let settings=common.render('Settings',data);let nodes=all(settings),inputs=nodes.filter(x=>x.tag==='input'),checkboxes=inputs.filter(x=>x.attrs.type==='checkbox');assert.equal(checkboxes[0].checked,false);assert.equal(inputs.find(x=>x.attrs.type==='time').value,'02:00');assert.equal(inputs.find(x=>x.attrs.type==='number').value,'60');
+ checkboxes[1].checked=true;checkboxes[1].attrs.change();assert(inputs.filter(x=>x.attrs.type==='time').slice(1).every(x=>x.disabled));
+ await find(settings,'Save local settings').attrs.click();assert(calls.some(c=>c.args.join(' ')==='save-settings 0 check 02:00 00:00 00:00 60'));
  for(const page of ['Overview','Updates','Logs','VPN','Settings'])assert.equal(common.render(page,data).tag,'div');
  let updates=common.render('Updates',data);assert(find(updates,'Install latest release').disabled);
  await find(updates,'Check for update').attrs.click();assert(!find(updates,'Install latest release').disabled);assert(JSON.stringify(updates).includes('AUTO APPLY ALLOWED'));assert(!JSON.stringify(updates).includes('WAITING FOR CANARY'));

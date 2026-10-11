@@ -26,6 +26,7 @@ LOG_INIT_SRC="$BASE_DIR/../init.d/home-net-log"
 STATUS_SRC="$BASE_DIR/../scripts/home-net-status"
 CONTROL_SRC="$BASE_DIR/../scripts/home-net-control"
 MANAGEMENT_SRC="$BASE_DIR/../scripts/home-net-management"
+VERIFY_SRC="$BASE_DIR/../scripts/home-net-install-verify"
 PODKOP_UPDATE_SRC="$BASE_DIR/../scripts/home-net-podkop-update"
 LUCI_VIEW_SRC="$BASE_DIR/../luci/view/home-net/status.js"
 LUCI_MENU_SRC="$BASE_DIR/../luci/menu.d/luci-app-home-net.json"
@@ -63,6 +64,7 @@ for FILE in \
     "$CONTROL_SRC" \
     "$MANAGEMENT_SRC" \
     "$PODKOP_UPDATE_SRC" \
+    "$VERIFY_SRC" \
     "$LUCI_VIEW_SRC" \
     "$LUCI_MENU_SRC" \
     "$LUCI_ACL_SRC"
@@ -83,11 +85,17 @@ for FILE in \
     "$CONTROL_SRC" \
     "$MANAGEMENT_SRC" \
     "$PODKOP_UPDATE_SRC" \
+    "$VERIFY_SRC" \
     "$INIT_SRC" \
     "$LOG_INIT_SRC"
 do
     sh -n "$FILE"
 done
+
+# Refuse an inconsistent baseline before changing any installed files.
+sh "$VERIFY_SRC" services
+sh "$VERIFY_SRC" health
+BEFORE_CHECK=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
 
 BACKUP_DIR="/root/backup-podkop-install"
 mkdir -p "$BACKUP_DIR"
@@ -105,6 +113,7 @@ for FILE in \
     /usr/bin/home-net-control \
     /usr/bin/home-net-management \
     /usr/bin/home-net-podkop-update \
+    /usr/bin/home-net-install-verify \
     /www/luci-static/resources/home-net/common.js \
     /www/luci-static/resources/view/home-net/updates.js \
     /www/luci-static/resources/view/home-net/logs.js \
@@ -133,21 +142,33 @@ cp "$LOG_DAEMON_SRC" /usr/bin/home-net-log-daemon
 cp "$LOG_CLI_SRC" /usr/bin/home-net-log
 cp "$LOG_INIT_SRC" /etc/init.d/home-net-log
 
+# BEGIN LUCI FILE INSTALL
+install_luci_file() {
+    cp "$1" "$2"
+    chmod 0644 "$2"
+}
+# END LUCI FILE INSTALL
 mkdir -p /www/luci-static/resources/view/home-net /usr/share/luci/menu.d /usr/share/rpcd/acl.d
 cp "$STATUS_SRC" /usr/bin/home-net-status
 cp "$CONTROL_SRC" /usr/bin/home-net-control
 cp "$MANAGEMENT_SRC" /usr/bin/home-net-management
+cp "$VERIFY_SRC" /usr/bin/home-net-install-verify
+chmod 0755 /usr/bin/home-net-install-verify
 cp "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
 chmod 0755 /usr/bin/home-net-podkop-update
 chmod 0755 /usr/bin/home-net-management
 mkdir -p /www/luci-static/resources/home-net
-cp "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
+install_luci_file "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
 for view in updates logs vpn settings; do
-    cp "$BASE_DIR/../luci/view/home-net/$view.js" "/www/luci-static/resources/view/home-net/$view.js"
+    install_luci_file "$BASE_DIR/../luci/view/home-net/$view.js" "/www/luci-static/resources/view/home-net/$view.js"
 done
-cp "$LUCI_VIEW_SRC" /www/luci-static/resources/view/home-net/status.js
-cp "$LUCI_MENU_SRC" /usr/share/luci/menu.d/luci-app-home-net.json
-cp "$LUCI_ACL_SRC" /usr/share/rpcd/acl.d/luci-app-home-net.json
+install_luci_file "$LUCI_VIEW_SRC" /www/luci-static/resources/view/home-net/status.js
+install_luci_file "$LUCI_MENU_SRC" /usr/share/luci/menu.d/luci-app-home-net.json
+install_luci_file "$LUCI_ACL_SRC" /usr/share/rpcd/acl.d/luci-app-home-net.json
+
+chmod 0644 /www/luci-static/resources/view/home-net/*.js /www/luci-static/resources/home-net/*.js
+chmod 0755 /www/luci-static/resources/view/home-net /www/luci-static/resources/home-net /usr/share/luci/menu.d /usr/share/rpcd/acl.d
+sh /usr/bin/home-net-install-verify luci
 
 if [ ! -f "$CONF_DST" ]; then
     cp "$CONF_SRC" "$CONF_DST"
@@ -178,7 +199,11 @@ chmod 0755 \
     /etc/init.d/home-net-log
 
 /etc/init.d/podkop-service-health enable
-/etc/init.d/podkop-service-health restart
+if /etc/init.d/podkop-service-health running; then
+    /etc/init.d/podkop-service-health restart
+else
+    /etc/init.d/podkop-service-health start
+fi
 
 /etc/init.d/home-net-log enable
 if /etc/init.d/home-net-log running; then
@@ -187,7 +212,25 @@ else
     /etc/init.d/home-net-log start
 fi
 
-/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+/etc/init.d/rpcd restart
+# Only recover a service that was running at preflight and disappeared during install.
+# Use start, never an unconditional restart that tears down routing.
+for service in podkop sing-box; do
+    if ! /etc/init.d/"$service" running || ! /etc/init.d/"$service" status; then
+        /etc/init.d/"$service" start || fail "cannot recover $service"
+    fi
+done
+verified=0
+for attempt in $(seq 1 60); do
+    current_check=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
+    if [ -n "$current_check" ] && [ "$current_check" != "$BEFORE_CHECK" ] &&
+        sh /usr/bin/home-net-install-verify all; then
+        verified=1
+        break
+    fi
+    sleep 10
+done
+[ "$verified" = 1 ] || fail 'installed service/lifecycle/health verification timed out; retain backup for recovery'
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
