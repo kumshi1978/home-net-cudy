@@ -38,19 +38,27 @@ nft_structure() {
     interfaces=$(nft -nn list set inet PodkopTable interfaces 2>/dev/null) || fail 'Podkop interface set missing'
     printf '%s' "$interfaces" | tr '\n' ' ' | grep -Eq 'elements = \{[[:space:]]*"[^" ]+"' || fail 'Podkop interface set empty'
 }
+mode_is() {
+    # BusyBox ls/awk are available on Cudy; stat is not required. Inspect the
+    # object itself, including directory execute bits. Reject symlinks and
+    # special permission bits instead of following a differently protected target.
+    listing=$(LC_ALL=C ls -ld "$1" 2>/dev/null) || return 1
+    mode=$(printf '%s\n' "$listing" | awk 'NR == 1 {print $1}')
+    [ "$mode" = "$2" ]
+}
 luci() {
     for view in status updates logs vpn settings; do
         file="$ROOT/www/luci-static/resources/view/home-net/$view.js"
         [ -s "$file" ] || fail "missing LuCI view $view"
-        [ "$(stat -c '%a' "$file")" = 644 ] || fail "LuCI view $view must be 644"
+        mode_is "$file" '-rw-r--r--' || fail "LuCI view $view must be 644"
     done
     file="$ROOT/www/luci-static/resources/home-net/common.js"
-    [ -s "$file" ] && [ "$(stat -c '%a' "$file")" = 644 ] || fail 'LuCI shared module missing or not 644'
+    [ -s "$file" ] && mode_is "$file" '-rw-r--r--' || fail 'LuCI shared module missing or not 644'
     for directory in "$ROOT/www/luci-static/resources/view/home-net" "$ROOT/www/luci-static/resources/home-net"; do
-        [ "$(stat -c '%a' "$directory")" = 755 ] || fail 'LuCI directory must be 755'
+        mode_is "$directory" 'drwxr-xr-x' || fail 'LuCI directory must be 755'
     done
     for file in "$ROOT"/www/luci-static/resources/view/home-net/*.js "$ROOT"/www/luci-static/resources/home-net/*.js; do
-        [ "$(stat -c '%a' "$file")" = 644 ] || fail "LuCI file $file must be 644"
+        mode_is "$file" '-rw-r--r--' || fail "LuCI file $file must be 644"
     done
     echo 'PASS: installed LuCI files 644, directories 755'
 }

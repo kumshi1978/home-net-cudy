@@ -12,6 +12,12 @@ export HOME_NET_TEST_REAL_DATE="$(command -v date)" HOME_NET_TEST_CLOCK_FILE="$T
 cp "$REPO/tests/fixtures/podkop-date" "$TMP/bin/date"
 cp "$REPO/tests/fixtures/podkop-nft" "$TMP/bin/nft"
 export PATH="$TMP/bin:$PATH"
+cat > "$TMP/bin/stat" <<'EOF'
+#!/bin/sh
+echo called > "$HOME_NET_VERIFY_ROOT/stat-called"
+echo 'stat: not found' >&2
+exit 127
+EOF
 cat > "$TMP/bin/uci" <<'EOF'
 #!/bin/sh
 echo /etc/sing-box/config.json
@@ -66,7 +72,9 @@ for service in podkop-service-health home-net-log; do cp "$TMP/root/etc/init.d/$
 sed "s|^BASE_DIR=.*|BASE_DIR='$TMP/src/install'|" "$TMP/install" > "$TMP/install.ready"
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
 sh "$REPO/scripts/home-net-install-verify" all
-[ "$(stat -c '%a' "$TMP/root/www/luci-static/resources/view/home-net/status.js")" = 644 ]
+[ "$(LC_ALL=C ls -ld "$TMP/root/www/luci-static/resources/view/home-net/status.js" | awk '{print $1}')" = '-rw-r--r--' ]
+[ ! -e "$TMP/root/stat-called" ]
+echo 'PASS actual installer and verifier do not call unavailable stat'
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
@@ -92,6 +100,11 @@ cp "$TMP/old-cycle" "$HOME_NET_VERIFY_HEALTH"
 chmod 600 "$TMP/root/www/luci-static/resources/view/home-net/status.js"
 if sh "$REPO/scripts/home-net-install-verify" luci; then exit 1; fi
 chmod 644 "$TMP/root/www/luci-static/resources/view/home-net/status.js"
+chmod 700 "$TMP/root/www/luci-static/resources/home-net"
+if sh "$REPO/scripts/home-net-install-verify" luci; then exit 1; fi
+chmod 755 "$TMP/root/www/luci-static/resources/home-net"
+sh "$REPO/scripts/home-net-install-verify" luci
+[ ! -e "$TMP/root/stat-called" ]
 rm "$TMP/root/www/luci-static/resources/view/home-net/vpn.js"
 if sh "$REPO/scripts/home-net-install-verify" luci; then exit 1; fi
 for missing in sing-box.running nft routing; do
