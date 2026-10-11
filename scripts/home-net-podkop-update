@@ -114,11 +114,13 @@ rollback() {
     # Never retry automatically after a failed rollback or claim restoration
     # based on the package command alone.
     transaction_dirty=0
-    rollback_before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH" 2>/dev/null || true)
     install_packages "$backup/packages" 0 1 > "$backup/rollback.log" 2>&1 || { echo 'ROLLBACK FAILED: package restoration requires operator intervention' >&2; return 1; }
     "$PODKOP_INIT" stop || return 1
     restore_config || return 1
     "$PODKOP_INIT" restart || return 1
+    # Only a cycle after initialization may authorize restoration. A monitor
+    # cycle during package downgrade must not satisfy the post-rollback gate.
+    rollback_before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH" 2>/dev/null || true)
     restored=$(podkop show_version 2>/dev/null) || return 1
     printf 'AFTER_ROLLBACK=%s\n' "${restored#v}" >> "$backup/versions"
     [ "${restored#v}" = "$current" ] || return 1
@@ -133,7 +135,6 @@ abort_transaction() {
 }
 transaction_dirty=0
 trap 'status=$?; if [ "$transaction_dirty" = 1 ]; then rollback || echo "ROLLBACK FAILED: operator intervention required; backup: $backup" >&2; fi; cleanup; exit "$status"' EXIT
-before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH")
 transaction_dirty=1
 if ! install_packages "$work/new" 0 > "$backup/install.log" 2>&1; then abort_transaction 'Podkop installation failed'; fi
 # Preserve original VPN/routing inputs. Never restart network or AWG.
@@ -142,6 +143,7 @@ installed=$(podkop show_version 2>/dev/null) || abort_transaction 'installed ver
 printf 'AFTER_UPDATE=%s\n' "${installed#v}" >> "$backup/versions"
 [ "${installed#v}" = "${latest#v}" ] || abort_transaction 'installed Podkop version mismatch'
 if ! "$PODKOP_INIT" restart; then abort_transaction 'Podkop initialization failed'; fi
+before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH" 2>/dev/null || true)
 if ! wait_lifecycle "$before" > "$backup/verification.log" 2>&1; then abort_transaction 'fresh Podkop/sing-box/health lifecycle failed'; fi
 transaction_dirty=0
 printf 'Podkop updated independently. Backup: %s\n' "$backup"

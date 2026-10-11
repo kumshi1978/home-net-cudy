@@ -51,6 +51,10 @@ printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=%s\nSERVICE_CHECK=OK
 EOF
 cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
+# Simulate the next independent monitor cycle, preserving failures/status.
+stamp=$(date -d "@$(($(date +%s)-1))" '+%F %T')
+sed "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" "$MOCK_ROOT/health" > "$MOCK_ROOT/health.new"
+mv "$MOCK_ROOT/health.new" "$MOCK_ROOT/health"
 exit 0
 EOF
 cat > "$TMP/bin/curl" <<'EOF'
