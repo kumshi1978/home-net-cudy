@@ -20,7 +20,7 @@ if [ "$kind" != nohook ]; then
 fi
 if [ "$kind" != norules ]; then
  for protocol in tcp udp; do
-  if [ "$kind" = numeric ]; then
+  if [ "$kind" = numeric ] || [ "$kind" = standby ]; then
    case "$protocol" in tcp) protocol=6 ;; udp) protocol=17 ;; esac
   fi
   if [ "$chain" = proxy ]; then
@@ -30,6 +30,7 @@ if [ "$kind" != norules ]; then
    [ "$kind" != nomarking ] || continue
    prefix=''; [ "$chain" != mangle ] || prefix='iifname @interfaces '
    for destination in 198.18.0.0/15 @podkop_subnets; do
+    [ "$kind:$destination" != standby:198.18.0.0/15 ] || continue
     echo "${prefix}ip daddr $destination meta l4proto $protocol meta mark set 0x00100000 counter packets 0 bytes 0"
    done
   fi

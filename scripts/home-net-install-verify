@@ -21,7 +21,9 @@ nft_structure() {
                 pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*$transport.*tproxy ip to 127[.]0[.]0[.]1:1602( |;|$)"
                 printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $protocol TPROXY rule missing"
             else
-                for destination in '198[.]18[.]0[.]0/15' '@podkop_subnets'; do
+                # Installed Podkop variants can route FakeIP through the
+                # subnet set instead of separate literal-range rules.
+                for destination in '@podkop_subnets'; do
                     pattern="ip daddr $destination.*$transport.*meta mark set (0x0*100000|1048576)( |;|$)"
                     [ "$chain" != mangle ] || pattern="iifname @interfaces.*$pattern"
                     printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $chain $protocol marking rule missing"

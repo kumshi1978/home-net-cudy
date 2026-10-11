@@ -70,7 +70,7 @@ sh "$REPO/scripts/home-net-install-verify" all
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
-for output in valid numeric; do
+for output in valid numeric standby; do
  MOCK_NFT_CASE="$output" sh "$REPO/scripts/home-net-install-verify" lifecycle > "$TMP/counters-output" 2>&1
  grep -q 'WARN: Podkop mangle has zero traffic counters' "$TMP/counters-output"
  grep -q 'PASS: Podkop initialized' "$TMP/counters-output"
