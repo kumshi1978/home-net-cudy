@@ -130,17 +130,21 @@ do
     [ -f "$FILE" ] && cp -p "$FILE" "$BACKUP_DIR/"
 done
 
-cp "$DAEMON_SRC" /usr/bin/podkop-service-health-daemon
-cp "$CHECK_SRC" /usr/bin/podkop-service-check
-cp "$FAKEIP_SRC" /usr/bin/podkop-fakeip-check
-cp "$EVENT_MONITOR_SRC" /usr/bin/podkop-event-monitor
-cp "$EVENT_RUNNER_SRC" /usr/bin/podkop-event-runner
-cp "$COUNTRY_LOOKUP_SRC" /usr/bin/podkop-country-lookup
-cp "$INIT_SRC" /etc/init.d/podkop-service-health
+install_executable() {
+    cp "$1" "$2"
+    chmod 0755 "$2"
+}
+install_executable "$DAEMON_SRC" /usr/bin/podkop-service-health-daemon
+install_executable "$CHECK_SRC" /usr/bin/podkop-service-check
+install_executable "$FAKEIP_SRC" /usr/bin/podkop-fakeip-check
+install_executable "$EVENT_MONITOR_SRC" /usr/bin/podkop-event-monitor
+install_executable "$EVENT_RUNNER_SRC" /usr/bin/podkop-event-runner
+install_executable "$COUNTRY_LOOKUP_SRC" /usr/bin/podkop-country-lookup
+install_executable "$INIT_SRC" /etc/init.d/podkop-service-health
 
-cp "$LOG_DAEMON_SRC" /usr/bin/home-net-log-daemon
-cp "$LOG_CLI_SRC" /usr/bin/home-net-log
-cp "$LOG_INIT_SRC" /etc/init.d/home-net-log
+install_executable "$LOG_DAEMON_SRC" /usr/bin/home-net-log-daemon
+install_executable "$LOG_CLI_SRC" /usr/bin/home-net-log
+install_executable "$LOG_INIT_SRC" /etc/init.d/home-net-log
 
 # BEGIN LUCI FILE INSTALL
 install_luci_file() {
@@ -149,14 +153,12 @@ install_luci_file() {
 }
 # END LUCI FILE INSTALL
 mkdir -p /www/luci-static/resources/view/home-net /usr/share/luci/menu.d /usr/share/rpcd/acl.d
-cp "$STATUS_SRC" /usr/bin/home-net-status
-cp "$CONTROL_SRC" /usr/bin/home-net-control
-cp "$MANAGEMENT_SRC" /usr/bin/home-net-management
-cp "$VERIFY_SRC" /usr/bin/home-net-install-verify
-chmod 0755 /usr/bin/home-net-install-verify
-cp "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
-chmod 0755 /usr/bin/home-net-podkop-update
-chmod 0755 /usr/bin/home-net-management
+install_executable "$STATUS_SRC" /usr/bin/home-net-status
+install_executable "$CONTROL_SRC" /usr/bin/home-net-control
+install_executable "$MANAGEMENT_SRC" /usr/bin/home-net-management
+install_executable "$VERIFY_SRC" /usr/bin/home-net-install-verify
+install_executable "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
+sh /usr/bin/home-net-install-verify runtime
 mkdir -p /www/luci-static/resources/home-net
 install_luci_file "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
 for view in updates logs vpn settings; do
@@ -183,20 +185,6 @@ fi
 if [ ! -f "$LOG_CONF_DST" ]; then
     cp "$LOG_CONF_SRC" "$LOG_CONF_DST"
 fi
-
-chmod 0755 \
-    /usr/bin/podkop-service-health-daemon \
-    /usr/bin/podkop-service-check \
-    /usr/bin/podkop-fakeip-check \
-    /usr/bin/podkop-event-monitor \
-    /usr/bin/podkop-event-runner \
-    /usr/bin/podkop-country-lookup \
-    /usr/bin/home-net-log-daemon \
-    /usr/bin/home-net-log \
-    /usr/bin/home-net-status \
-    /usr/bin/home-net-control \
-    /etc/init.d/podkop-service-health \
-    /etc/init.d/home-net-log
 
 /etc/init.d/podkop-service-health enable
 if /etc/init.d/podkop-service-health running; then

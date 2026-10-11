@@ -46,6 +46,17 @@ mode_is() {
     mode=$(printf '%s\n' "$listing" | awk 'NR == 1 {print $1}')
     [ "$mode" = "$2" ]
 }
+runtime() {
+    for name in podkop-service-health-daemon podkop-service-check podkop-fakeip-check podkop-event-monitor podkop-event-runner podkop-country-lookup home-net-log-daemon home-net-log home-net-status home-net-control home-net-management home-net-install-verify home-net-podkop-update; do
+        file="$ROOT/usr/bin/$name"
+        [ -s "$file" ] && [ -x "$file" ] && mode_is "$file" '-rwxr-xr-x' || fail "runtime helper $name missing or not 755"
+    done
+    for name in podkop-service-health home-net-log; do
+        file="$ROOT/etc/init.d/$name"
+        [ -s "$file" ] && [ -x "$file" ] && mode_is "$file" '-rwxr-xr-x' || fail "init script $name missing or not 755"
+    done
+    echo 'PASS: all Monitoring runtime helpers and init scripts 755'
+}
 luci() {
     for view in status updates logs vpn settings; do
         file="$ROOT/www/luci-static/resources/view/home-net/$view.js"
@@ -103,9 +114,10 @@ health() {
 }
 case "${1:-all}" in
     luci) luci ;;
+    runtime) runtime ;;
     services) services ;;
     health) health ;;
     lifecycle) services; health ;;
-    all) luci; services; health ;;
-    *) fail 'usage: home-net-install-verify {luci|services|health|lifecycle|all}' ;;
+    all) runtime; luci; services; health ;;
+    *) fail 'usage: home-net-install-verify {runtime|luci|services|health|lifecycle|all}' ;;
 esac

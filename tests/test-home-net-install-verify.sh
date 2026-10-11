@@ -69,6 +69,7 @@ done
 mkdir "$TMP/src"
 cp -R "$REPO/install" "$REPO/scripts" "$REPO/configs" "$REPO/luci" "$REPO/init.d" "$TMP/src/"
 for service in podkop-service-health home-net-log; do cp "$TMP/root/etc/init.d/$service" "$TMP/src/init.d/$service"; done
+chmod 0644 "$TMP/src/scripts/"* "$TMP/src/init.d/"*
 sed "s|^BASE_DIR=.*|BASE_DIR='$TMP/src/install'|" "$TMP/install" > "$TMP/install.ready"
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
 sh "$REPO/scripts/home-net-install-verify" all
@@ -78,6 +79,16 @@ echo 'PASS actual installer and verifier do not call unavailable stat'
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
+sh "$REPO/scripts/home-net-install-verify" runtime
+for helper in podkop-service-health-daemon podkop-fakeip-check home-net-status home-net-podkop-update; do
+ chmod 0600 "$TMP/root/usr/bin/$helper"
+ if sh "$REPO/scripts/home-net-install-verify" runtime; then exit 1; fi
+ chmod 0755 "$TMP/root/usr/bin/$helper"
+done
+chmod 0644 "$TMP/root/etc/init.d/podkop-service-health"
+if sh "$REPO/scripts/home-net-install-verify" runtime; then exit 1; fi
+chmod 0755 "$TMP/root/etc/init.d/podkop-service-health"
+echo 'PASS non-executable sources and umask 077 yield all helpers/init 755; regressions rejected'
 for output in valid numeric standby; do
  MOCK_NFT_CASE="$output" sh "$REPO/scripts/home-net-install-verify" lifecycle > "$TMP/counters-output" 2>&1
  grep -q 'WARN: Podkop mangle has zero traffic counters' "$TMP/counters-output"
