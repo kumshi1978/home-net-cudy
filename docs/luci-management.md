@@ -145,14 +145,31 @@ still apply. Explicit manual Install is independent of automatic settings.
 Logs add display-only ERROR red, WARN orange, INFO/OK green and DEBUG gray lines;
 unknown severity remains neutral and text is rendered without HTML interpretation.
 
-The current Monitoring PODKOP field checks NFT/IP rules; it does not prove a live
-procd service. The installer now requires consistent running/status for Podkop and
-sing-box before replacement, and separately checks health. An inconsistent baseline
-fails before modification. Monitoring uses start for a missing procd instance and
-restart only for an existing one. Application services are not stopped or restarted
-unconditionally. If a previously running service disappears during installation,
-one start is attempted; final verification requires matching lifecycle status and
-a fresh healthy cycle within 600 seconds. Failure is explicit and retains backups.
-One-shot Podkop variants that report not-running while rules remain installed need
-separate hardware investigation; rules alone are not accepted as installation PASS.
-No real-router lifecycle recovery has been tested by this correction.
+Podkop 0.7.22 initializes configuration, nft/routing and sing-box, then its start
+process exits. Absence of a persistent Podkop process (including procd not-running)
+is expected and does not trigger a restart or failure. Monitoring installation never
+starts/stops/restarts Podkop or sing-box. The read-only lifecycle verifier requires:
+the nonempty generated config selected by Podkop UCI, matching sing-box conffile,
+PodkopTable, the FakeIP-mark routing rule and local route, sing-box running/status,
+and all health gates OK with LAST_CHECK no older than 600 seconds. Missing/future
+timestamps fail closed. Installation additionally waits for a new healthy cycle.
+
+The separate, explicitly confirmed Podkop update validates the installed target
+version, initializes Podkop, then checks the complete lifecycle and a new health
+cycle. A cached STATUS=OK alone cannot accept a stopped proxy or missing config.
+IPK rollback uses opkg --force-downgrade with the previously verified local assets;
+ordinary install of an older version is rejected by the regression mock. Original,
+target, observed update/failure and restored versions are recorded in versions.
+
+The rollback inventory preserves contents, modes and original absence for:
+etc/config/{podkop,network,dhcp,sing-box}, etc/sing-box, tmp/sing-box, tmp/podkop,
+etc/crontabs/root and etc/iproute2/rt_tables. Generated configs outside the backed
+sing-box directories are rejected before update. After restoring packages, Podkop
+is stopped, the full inventory restored, then initialized with the old inputs;
+nft/routing and workers are regenerated. Old PID files are not replayed. The saved
+health state is evidence only: success requires the original version and a new
+healthy lifecycle cycle. Failed restoration is reported as ROLLBACK FAILED with
+the retained private backup; it is not silently retried or reported as success.
+Offline fixtures cover one-shot Podkop, missing proxy/config/rules, FakeIP failure,
+real downgrade semantics, partial update/full file restoration and unhealthy rollback.
+Hardware lifecycle and rollback still require a backup-only canary test.
