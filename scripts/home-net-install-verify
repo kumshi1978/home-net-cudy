@@ -21,25 +21,39 @@ luci() {
     echo 'PASS: installed LuCI files 644, directories 755'
 }
 services() {
-    for service in podkop sing-box; do
-        init="$ROOT/etc/init.d/$service"
-        [ -x "$init" ] || fail "missing $service init"
-        "$init" running || fail "$service is not running in procd"
-        "$init" status || fail "$service status disagrees with running"
-    done
-    echo 'PASS: Podkop and sing-box lifecycle'
+    # Podkop 0.7.22 initializes rules/config and exits; its procd status is not
+    # a daemon liveness test. Validate the artifacts and actual proxy instead.
+    generated=$(uci -c "$ROOT/etc/config" -q get podkop.settings.config_path) || fail 'Podkop generated config path unavailable'
+    case "$generated" in /*) ;; *) fail 'Podkop config path must be absolute' ;; esac
+    [ -s "$ROOT$generated" ] || fail 'Podkop generated sing-box config missing'
+    conffile=$(uci -c "$ROOT/etc/config" -q get sing-box.main.conffile) || fail 'sing-box configured path unavailable'
+    [ "$conffile" = "$generated" ] || fail 'sing-box is using a different generated config'
+    nft list table inet PodkopTable >/dev/null 2>&1 || fail 'Podkop nft table missing'
+    ip -4 rule list | grep -Eq 'fwmark 0x100000(/0x100000)? lookup (podkop|105)' || fail 'Podkop routing rule missing'
+    ip -4 route list table podkop | grep -Eq '^local (default|0.0.0.0/0) dev lo' || fail 'Podkop local route missing'
+    init="$ROOT/etc/init.d/sing-box"
+    [ -x "$init" ] || fail 'missing sing-box init'
+    "$init" running || fail 'sing-box is not running in procd'
+    "$init" status || fail 'sing-box status disagrees with running'
+    echo 'PASS: Podkop initialized, nft/routing present, sing-box running'
 }
 health() {
     [ -r "$HEALTH" ] || fail 'health state missing'
     for pair in STATUS=OK PODKOP=RUNNING SING_BOX=RUNNING FAKEIP=OK SERVICE_CHECK=OK; do
         grep -Fxq "$pair" "$HEALTH" || fail "health requires $pair"
     done
+    stamp=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH")
+    [ -n "$stamp" ] || fail 'health timestamp missing'
+    epoch=$(date -d "$stamp" +%s 2>/dev/null) || fail 'invalid health timestamp'
+    age=$(( $(date +%s) - epoch ))
+    [ "$age" -ge 0 ] && [ "$age" -le 600 ] || fail 'health state stale or in the future'
     echo 'PASS: health OK (lifecycle checked separately)'
 }
 case "${1:-all}" in
     luci) luci ;;
     services) services ;;
     health) health ;;
+    lifecycle) services; health ;;
     all) luci; services; health ;;
-    *) fail 'usage: home-net-install-verify {luci|services|health|all}' ;;
+    *) fail 'usage: home-net-install-verify {luci|services|health|lifecycle|all}' ;;
 esac
