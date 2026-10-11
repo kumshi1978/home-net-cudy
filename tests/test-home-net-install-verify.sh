@@ -72,10 +72,20 @@ for service in podkop-service-health home-net-log; do cp "$TMP/root/etc/init.d/$
 chmod 0644 "$TMP/src/scripts/"* "$TMP/src/init.d/"*
 sed "s|^BASE_DIR=.*|BASE_DIR='$TMP/src/install'|" "$TMP/install" > "$TMP/install.ready"
 # Reproduce an early LuCI-stage abort before the old late chmod location.
-mv "$TMP/src/luci/home-net/common.js" "$TMP/common.saved"
-if (umask 077; sh "$TMP/install.ready") > "$TMP/partial-output" 2>&1; then exit 1; fi
+export HOME_NET_TEST_REAL_CP="$(command -v cp)"
+cat > "$TMP/bin/cp" <<'EOF'
+#!/bin/sh
+for argument do destination="$argument"; done
+if [ "${FAIL_LUCI_COPY:-0}" = 1 ] && [ "$destination" = "$HOME_NET_VERIFY_ROOT/www/luci-static/resources/home-net/common.js" ]; then
+ echo 'fixture: LuCI copy failed' >&2
+ exit 1
+fi
+exec "$HOME_NET_TEST_REAL_CP" "$@"
+EOF
+chmod 0755 "$TMP/bin/cp"
+if (umask 077; FAIL_LUCI_COPY=1 sh "$TMP/install.ready") > "$TMP/partial-output" 2>&1; then exit 1; fi
+grep -q 'fixture: LuCI copy failed' "$TMP/partial-output"
 sh "$REPO/scripts/home-net-install-verify" runtime
-mv "$TMP/common.saved" "$TMP/src/luci/home-net/common.js"
 echo 'PASS early LuCI failure leaves every copied runtime helper/init executable'
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
 sh "$REPO/scripts/home-net-install-verify" all
