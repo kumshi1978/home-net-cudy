@@ -7,14 +7,22 @@ export HOME_NET_VERIFY_ROOT="$TMP/root"
 export HOME_NET_VERIFY_HEALTH="$TMP/root/tmp/podkop-service-health/state"
 mkdir -p "$TMP/root/etc/init.d" "$TMP/root/usr/bin" "$TMP/root/tmp/podkop-service-health" "$TMP/root/www/luci-static/resources/view/home-net" "$TMP/root/www/luci-static/resources/home-net"
 mkdir -p "$TMP/bin" "$TMP/root/etc/sing-box" "$TMP/root/etc/config"
+export HOME_NET_TEST_REAL_DATE="$(command -v date)" HOME_NET_TEST_CLOCK_FILE="$TMP/clock"
+"$HOME_NET_TEST_REAL_DATE" +%s > "$TMP/clock"
+cp "$REPO/tests/fixtures/podkop-date" "$TMP/bin/date"
+cp "$REPO/tests/fixtures/podkop-nft" "$TMP/bin/nft"
 export PATH="$TMP/bin:$PATH"
 cat > "$TMP/bin/uci" <<'EOF'
 #!/bin/sh
 echo /etc/sing-box/config.json
 EOF
-cat > "$TMP/bin/nft" <<'EOF'
+cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
-[ -f "$HOME_NET_VERIFY_ROOT/nft" ]
+epoch=$(($(date +%s)+2))
+printf '%s\n' "$epoch" > "$HOME_NET_TEST_CLOCK_FILE"
+stamp=$(date '+%F %T')
+sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
+mv "$HOME_NET_VERIFY_HEALTH.new" "$HOME_NET_VERIFY_HEALTH"
 EOF
 cat > "$TMP/bin/ip" <<'EOF'
 #!/bin/sh
@@ -29,7 +37,7 @@ sed -e "s|/etc/|@FIXTURE@/etc/|g" -e "s|/usr/|@FIXTURE@/usr/|g" -e "s|/www/|@FIX
 sed "s|^BASE_DIR=.*|BASE_DIR='$REPO/install'|" "$TMP/install.fixture" > "$TMP/install"
 touch "$TMP/root/etc/openwrt_release" "$TMP/root/sing-box.running" "$TMP/root/nft" "$TMP/root/routing"
 stamp=$(date -d "@$(($(date +%s)-10))" '+%F %T')
-printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\nLAST_CHECK=%s\n' "$stamp" > "$HOME_NET_VERIFY_HEALTH"
+printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\nCHECK_STARTED=%s\nLAST_CHECK=%s\n' "$stamp" "$stamp" > "$HOME_NET_VERIFY_HEALTH"
 for service in podkop sing-box podkop-service-health home-net-log rpcd; do
 cat > "$TMP/root/etc/init.d/$service" <<'INIT'
 #!/bin/sh
@@ -41,7 +49,7 @@ case "$1" in
   touch "$HOME_NET_VERIFY_ROOT/$name.running"
   if [ "$name" = podkop-service-health ]; then
    stamp=$(date -d "@$(($(date +%s)-2))" '+%F %T')
-   sed "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
+   sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
    mv "$HOME_NET_VERIFY_HEALTH.new" "$HOME_NET_VERIFY_HEALTH"
    [ "${DROP_PODKOP:-0}" != 1 ] || rm -f "$HOME_NET_VERIFY_ROOT/podkop.running"
   fi ;;
@@ -62,6 +70,19 @@ sh "$REPO/scripts/home-net-install-verify" all
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
+for structure in empty nohook norules nomarking notproxy; do
+ if MOCK_NFT_CASE="$structure" sh "$REPO/scripts/home-net-install-verify" lifecycle; then exit 1; fi
+ echo "PASS nft rejects $structure"
+done
+boundary=$(date +%s)
+if HOME_NET_VERIFY_AFTER_EPOCH="$boundary" sh "$REPO/scripts/home-net-install-verify" lifecycle; then exit 1; fi
+echo 'PASS health cycle at/before initialization boundary rejected'
+cp "$HOME_NET_VERIFY_HEALTH" "$TMP/old-cycle"
+started=$(date -d "@$((boundary-20))" '+%F %T')
+sed "s/CHECK_STARTED=.*/CHECK_STARTED=$started/" "$TMP/old-cycle" > "$HOME_NET_VERIFY_HEALTH"
+if HOME_NET_VERIFY_AFTER_EPOCH="$((boundary-1))" sh "$REPO/scripts/home-net-install-verify" lifecycle; then exit 1; fi
+echo 'PASS new LAST_CHECK with pre-initialization CHECK_STARTED rejected'
+cp "$TMP/old-cycle" "$HOME_NET_VERIFY_HEALTH"
 chmod 600 "$TMP/root/www/luci-static/resources/view/home-net/status.js"
 if sh "$REPO/scripts/home-net-install-verify" luci; then exit 1; fi
 chmod 644 "$TMP/root/www/luci-static/resources/view/home-net/status.js"

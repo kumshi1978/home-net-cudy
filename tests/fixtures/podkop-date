@@ -1,0 +1,10 @@
+#!/bin/sh
+# Deterministic advancing clock, isolated from the machine clock.
+set -eu
+epoch=$(cat "$HOME_NET_TEST_CLOCK_FILE")
+case "$*" in
+ '+%s') echo "$epoch" ;;
+ '+%F %T') "$HOME_NET_TEST_REAL_DATE" -d "@$epoch" '+%F %T' ;;
+ '+%Y%m%d-%H%M%S') "$HOME_NET_TEST_REAL_DATE" -d "@$epoch" '+%Y%m%d-%H%M%S' ;;
+ *) "$HOME_NET_TEST_REAL_DATE" "$@" ;;
+esac

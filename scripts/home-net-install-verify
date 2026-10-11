@@ -4,6 +4,32 @@ set -eu
 ROOT=${HOME_NET_VERIFY_ROOT:-}
 HEALTH=${HOME_NET_VERIFY_HEALTH:-$ROOT/tmp/podkop-service-health/state}
 fail() { echo "FAIL: $*" >&2; exit 1; }
+nft_structure() {
+    nft list table inet PodkopTable >/dev/null 2>&1 || fail 'Podkop nft table missing'
+    for chain in mangle mangle_output proxy; do
+        rules=$(nft -nn list chain inet PodkopTable "$chain" 2>/dev/null) || fail "Podkop nft chain $chain missing"
+        case "$chain" in
+            mangle) hook='type filter hook prerouting priority (mangle|-150);' ;;
+            mangle_output) hook='type route hook output priority (mangle|-150);' ;;
+            proxy) hook='type filter hook prerouting priority (dstnat|-100);' ;;
+        esac
+        printf '%s\n' "$rules" | grep -Eq "$hook" || fail "Podkop nft chain $chain hook/priority invalid"
+        for protocol in tcp udp; do
+            if [ "$chain" = proxy ]; then
+                pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*meta l4proto $protocol.*tproxy ip to 127[.]0[.]0[.]1:1602"
+                printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $protocol TPROXY rule missing"
+            else
+                for destination in '198[.]18[.]0[.]0/15' '@podkop_subnets'; do
+                    pattern="ip daddr $destination.*meta l4proto $protocol.*meta mark set (0x0*100000|1048576)( |$)"
+                    [ "$chain" != mangle ] || pattern="iifname @interfaces.*$pattern"
+                    printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $chain $protocol marking rule missing"
+                done
+            fi
+        done
+    done
+    interfaces=$(nft -nn list set inet PodkopTable interfaces 2>/dev/null) || fail 'Podkop interface set missing'
+    printf '%s' "$interfaces" | tr '\n' ' ' | grep -Eq 'elements = \{[[:space:]]*"[^" ]+"' || fail 'Podkop interface set empty'
+}
 luci() {
     for view in status updates logs vpn settings; do
         file="$ROOT/www/luci-static/resources/view/home-net/$view.js"
@@ -28,7 +54,7 @@ services() {
     [ -s "$ROOT$generated" ] || fail 'Podkop generated sing-box config missing'
     conffile=$(uci -c "$ROOT/etc/config" -q get sing-box.main.conffile) || fail 'sing-box configured path unavailable'
     [ "$conffile" = "$generated" ] || fail 'sing-box is using a different generated config'
-    nft list table inet PodkopTable >/dev/null 2>&1 || fail 'Podkop nft table missing'
+    nft_structure
     ip -4 rule list | grep -Eq 'fwmark 0x100000(/0x100000)? lookup (podkop|105)' || fail 'Podkop routing rule missing'
     ip -4 route list table podkop | grep -Eq '^local (default|0.0.0.0/0) dev lo' || fail 'Podkop local route missing'
     init="$ROOT/etc/init.d/sing-box"
@@ -47,6 +73,16 @@ health() {
     epoch=$(date -d "$stamp" +%s 2>/dev/null) || fail 'invalid health timestamp'
     age=$(( $(date +%s) - epoch ))
     [ "$age" -ge 0 ] && [ "$age" -le 600 ] || fail 'health state stale or in the future'
+    started=$(sed -n 's/^CHECK_STARTED=//p' "$HEALTH")
+    started_epoch=$(date -d "$started" +%s 2>/dev/null) || fail 'health cycle start invalid'
+    [ -n "$started" ] && [ "$started_epoch" -le "$epoch" ] || fail 'health cycle incomplete'
+    # During a new cycle Monitoring publishes CHECK_STARTED with the previous
+    # result. Require that the result belongs to this completed cycle.
+    if [ -n "${HOME_NET_VERIFY_AFTER_EPOCH:-}" ]; then
+        boundary="$HOME_NET_VERIFY_AFTER_EPOCH"
+        case "$boundary" in ''|*[!0-9]*) fail 'invalid initialization boundary' ;; esac
+        [ "$started_epoch" -gt "$boundary" ] && [ "$epoch" -gt "$boundary" ] || fail 'health cycle predates initialization'
+    fi
     echo 'PASS: health OK (lifecycle checked separately)'
 }
 case "${1:-all}" in

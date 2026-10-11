@@ -173,3 +173,23 @@ the retained private backup; it is not silently retried or reported as success.
 Offline fixtures cover one-shot Podkop, missing proxy/config/rules, FakeIP failure,
 real downgrade semantics, partial update/full file restoration and unhealthy rollback.
 Hardware lifecycle and rollback still require a backup-only canary test.
+
+Round 2 validation requires mangle/prerouting (-150), mangle_output/output
+(-150) and proxy/prerouting (-100), TCP/UDP FakeIP and subnet marking, TCP/UDP
+TPROXY to 127.0.0.1:1602, and a nonempty interfaces set. Empty tables, missing
+hooks or missing interception rules fail. This is configuration inspection only;
+the verifier does not generate test traffic.
+
+After restart, update/rollback first wait for the initialized nft/routing/proxy
+structure, then record an epoch boundary. The completed monitoring cycle must
+have CHECK_STARTED strictly newer than that boundary, LAST_CHECK at or after
+CHECK_STARTED, and fresh full health. Publishing a new CHECK_STARTED while the
+previous LAST_CHECK is retained is not a completed cycle. Monitoring installation
+also requires a cycle beginning after its initialization boundary. Structure and
+health waits each have a 600-second limit.
+
+Cache handling uses fail-safe denial: UCI cache_path (default
+/tmp/sing-box/cache.db) must be inside the fully backed /tmp/sing-box or
+/etc/sing-box directories. Paths containing traversal or config/cache symlink
+components are rejected before package mutation. Custom cache locations outside
+this inventory receive an explicit error; configuration is not rewritten.

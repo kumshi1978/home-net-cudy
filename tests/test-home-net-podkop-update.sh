@@ -5,15 +5,15 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/bin" "$TMP/router/etc/config" "$TMP/router/etc/sing-box" "$TMP/router/etc/init.d" "$TMP/router/tmp/sing-box" "$TMP/router/tmp/podkop" "$TMP/backups"
 export MOCK_ROOT="$TMP" HOME_NET_PODKOP_ROOT="$TMP/router" HOME_NET_MANAGEMENT_BACKUPS="$TMP/backups" HOME_NET_UPDATE_LOCK_DIR="$TMP/lock" HOME_NET_UPDATE_HEALTH_STATE="$TMP/health" HOME_NET_PODKOP_INIT="$TMP/bin/service"
+export HOME_NET_TEST_REAL_DATE="$(command -v date)" HOME_NET_TEST_CLOCK_FILE="$TMP/clock"
+"$HOME_NET_TEST_REAL_DATE" +%s > "$TMP/clock"
+cp "$ROOT/tests/fixtures/podkop-date" "$TMP/bin/date"
+cp "$ROOT/tests/fixtures/podkop-nft" "$TMP/bin/nft"
 export PATH="$TMP/bin:$PATH"
 export HOME_NET_PODKOP_VERIFIER="$ROOT/scripts/home-net-install-verify"
 cat > "$TMP/bin/uci" <<'EOF'
 #!/bin/sh
-echo /etc/sing-box/config.json
-EOF
-cat > "$TMP/bin/nft" <<'EOF'
-#!/bin/sh
-[ -f "$MOCK_ROOT/nft" ]
+case "$*" in *cache_path*) echo "${MOCK_CACHE_PATH:-/tmp/sing-box/cache.db}" ;; *) echo /etc/sing-box/config.json ;; esac
 EOF
 cat > "$TMP/bin/ip" <<'EOF'
 #!/bin/sh
@@ -47,14 +47,21 @@ else
  status=${MOCK_ROLLBACK_HEALTH:-OK}
 fi
 stamp=$(date -d "@$(($(date +%s)-offset))" '+%F %T')
-printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=%s\nSERVICE_CHECK=OK\nLAST_CHECK=%s\n' "$status" "$fakeip" "$stamp" > "$MOCK_ROOT/health"
+printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=%s\nSERVICE_CHECK=OK\nCHECK_STARTED=%s\nLAST_CHECK=%s\n' "$status" "$fakeip" "$stamp" "$stamp" > "$MOCK_ROOT/health"
 EOF
 cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
 # Simulate the next independent monitor cycle, preserving failures/status.
 [ "$(cat "$MOCK_ROOT/current")" != 0.7.24 ] || [ "${MOCK_NO_NEW_CYCLE:-0}" = 0 ] || exit 0
-stamp=$(date -d "@$(($(date +%s)-1))" '+%F %T')
-sed "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" "$MOCK_ROOT/health" > "$MOCK_ROOT/health.new"
+epoch=$(($(date +%s)+2))
+printf '%s\n' "$epoch" > "$HOME_NET_TEST_CLOCK_FILE"
+started=$(date -d "@$((epoch-1))" '+%F %T')
+stamp=$(date '+%F %T')
+if [ "$(cat "$MOCK_ROOT/current")" = 0.7.24 ] && [ "${MOCK_OLD_CYCLE:-0}" = 1 ]; then
+ sed "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" "$MOCK_ROOT/health" > "$MOCK_ROOT/health.new"
+else
+ sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$started/" "$MOCK_ROOT/health" > "$MOCK_ROOT/health.new"
+fi
 mv "$MOCK_ROOT/health.new" "$MOCK_ROOT/health"
 exit 0
 EOF
@@ -113,6 +120,7 @@ for(const [tag,contents,file] of [['0.7.22','old','old'],['0.7.24','new','latest
 }
 EOF
 reset() {
+ "$HOME_NET_TEST_REAL_DATE" +%s > "$HOME_NET_TEST_CLOCK_FILE"
  printf 0.7.22 > "$TMP/current"
  printf protected > "$TMP/router/etc/config/network"
  printf routing > "$TMP/router/etc/config/podkop"
@@ -122,7 +130,7 @@ reset() {
  printf dhcp > "$TMP/router/etc/config/dhcp"
  touch "$TMP/sing-box.running" "$TMP/nft" "$TMP/routing"
  stamp=$(date -d "@$(($(date +%s)-10))" '+%F %T')
- printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\nLAST_CHECK=%s\n' "$stamp" > "$TMP/health"
+ printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\nCHECK_STARTED=%s\nLAST_CHECK=%s\n' "$stamp" "$stamp" > "$TMP/health"
  rm -f "$TMP/router/etc/sing-box/added.json" "$TMP/router/tmp/sing-box/new.cache" "$TMP/router/etc/config/sing-box"
  rm -f "$TMP/mutations"
 }
@@ -136,7 +144,7 @@ echo 'PASS Podkop exact asset checksums, backup, install, fresh health and prote
 if opkg install podkop-v0.7.22-r1-all.ipk >/dev/null 2>&1; then exit 1; fi
 [ "$(cat "$TMP/current")" = 0.7.24 ]
 echo 'PASS ordinary opkg install cannot perform rollback downgrade'
-for failure in dependency install network health fakeip singbox config cycle target lock; do
+for failure in dependency install network health fakeip singbox config cycle oldcycle cache target lock; do
  reset
  case "$failure" in
  dependency) export MOCK_DEPENDENCY=1 ;;
@@ -147,13 +155,15 @@ for failure in dependency install network health fakeip singbox config cycle tar
  singbox) export MOCK_NO_SING_BOX=1 ;;
  config) export MOCK_NO_CONFIG=1 ;;
  cycle) export MOCK_NO_NEW_CYCLE=1 ;;
+ oldcycle) export MOCK_OLD_CYCLE=1 ;;
+ cache) export MOCK_CACHE_PATH=/mnt/podkop/cache.db ;;
  lock) mkdir "$TMP/lock"; printf '%s\n' "$$" > "$TMP/lock/pid" ;;
  esac
  target=0.7.24; [ "$failure" != target ] || target=0.7.25
  if sh "$ROOT/scripts/home-net-podkop-update" update "$target" > "$TMP/result" 2>&1; then cat "$TMP/result"; exit 1; fi
  [ "$(cat "$TMP/current")" = 0.7.22 ]
  [ "$(cat "$TMP/router/etc/config/network")" = protected ]
- case "$failure" in install|network|health|fakeip|singbox|config|cycle)
+ case "$failure" in install|network|health|fakeip|singbox|config|cycle|oldcycle)
   grep -q rollback "$TMP/mutations"
   grep -q 'ROLLBACK VERIFIED' "$TMP/result"
   [ "$(cat "$TMP/router/etc/sing-box/config.json")" = config ]
@@ -165,7 +175,8 @@ for failure in dependency install network health fakeip singbox config cycle tar
   [ ! -e "$TMP/router/tmp/sing-box/new.cache" ]
   HOME_NET_VERIFY_ROOT="$TMP/router" HOME_NET_VERIFY_HEALTH="$TMP/health" sh "$ROOT/scripts/home-net-install-verify" lifecycle
   ;; *) [ ! -e "$TMP/mutations" ] ;; esac
- unset MOCK_DEPENDENCY MOCK_FAIL MOCK_CHANGE_NETWORK MOCK_HEALTH MOCK_FAKEIP MOCK_NO_SING_BOX MOCK_NO_CONFIG MOCK_NO_NEW_CYCLE
+ [ "$failure" != cache ] || grep -q 'cache_path is outside rollback inventory' "$TMP/result"
+ unset MOCK_DEPENDENCY MOCK_FAIL MOCK_CHANGE_NETWORK MOCK_HEALTH MOCK_FAKEIP MOCK_NO_SING_BOX MOCK_NO_CONFIG MOCK_NO_NEW_CYCLE MOCK_OLD_CYCLE MOCK_CACHE_PATH
  [ "$failure" != lock ] || { rm "$TMP/lock/pid"; rmdir "$TMP/lock"; }
  echo "PASS Podkop fail-closed/rollback $failure"
 done

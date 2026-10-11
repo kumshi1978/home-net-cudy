@@ -8,7 +8,17 @@ BACKUPS=${HOME_NET_MANAGEMENT_BACKUPS:-/root}
 HEALTH=${HOME_NET_UPDATE_HEALTH_STATE:-/tmp/podkop-service-health/state}
 PODKOP_INIT=${HOME_NET_PODKOP_INIT:-/etc/init.d/podkop}
 VERIFIER=${HOME_NET_PODKOP_VERIFIER:-/usr/bin/home-net-install-verify}
-verify_lifecycle() { HOME_NET_VERIFY_ROOT="$ROOT" HOME_NET_VERIFY_HEALTH="$HEALTH" sh "$VERIFIER" lifecycle; }
+verify_lifecycle() { HOME_NET_VERIFY_ROOT="$ROOT" HOME_NET_VERIFY_HEALTH="$HEALTH" HOME_NET_VERIFY_AFTER_EPOCH="${initialization_epoch:-}" sh "$VERIFIER" lifecycle; }
+wait_initialized() {
+    for attempt in $(seq 1 60); do
+        if HOME_NET_VERIFY_ROOT="$ROOT" sh "$VERIFIER" services; then
+            initialization_epoch=$(date +%s)
+            return 0
+        fi
+        sleep 10
+    done
+    return 1
+}
 wait_lifecycle() {
     baseline="$1"
     for attempt in $(seq 1 60); do
@@ -46,6 +56,17 @@ printf '%s\n' "$$" > "$LOCK/pid"
 verify_lifecycle || fail 'Podkop lifecycle preflight failed'
 generated=$(uci -c "$ROOT/etc/config" -q get podkop.settings.config_path) || fail 'config path unavailable'
 case "$generated" in *'/../'*|*'/./'*|*/..|*/.) fail 'unsafe generated config path' ;; /etc/sing-box/*|/tmp/sing-box/*) ;; *) fail 'generated config is outside the supported rollback inventory' ;; esac
+cache=$(uci -c "$ROOT/etc/config" -q get podkop.settings.cache_path 2>/dev/null || true)
+[ -n "$cache" ] || cache=/tmp/sing-box/cache.db
+# Fail closed for paths not covered by the complete directory snapshots,
+# including symlinks that could escape them. No router configuration is changed.
+case "$cache" in *'/../'*|*'/./'*|*/..|*/.) fail 'unsafe Podkop cache_path' ;; /etc/sing-box/*|/tmp/sing-box/*) ;; *) fail "Podkop cache_path is outside rollback inventory: $cache" ;; esac
+for path in "$generated" "$cache"; do
+    while [ "$path" != / ]; do
+        [ ! -L "$ROOT$path" ] || fail 'Podkop config/cache symlink is outside the supported rollback model'
+        path=$(dirname "$path")
+    done
+done
 [ -r "$ROOT/etc/config/podkop" ] && [ -r "$ROOT/etc/config/network" ] || fail 'required configuration missing'
 if command -v apk >/dev/null 2>&1; then manager=apk; ext=apk; else command -v opkg >/dev/null 2>&1 || fail 'no package manager'; manager=opkg; ext=ipk; fi
 fetch "https://api.github.com/repos/itdoginfo/podkop/releases/tags/$current" "$work/old.json"
@@ -118,6 +139,7 @@ rollback() {
     "$PODKOP_INIT" stop || return 1
     restore_config || return 1
     "$PODKOP_INIT" restart || return 1
+    wait_initialized >> "$backup/rollback.log" 2>&1 || return 1
     # Only a cycle after initialization may authorize restoration. A monitor
     # cycle during package downgrade must not satisfy the post-rollback gate.
     rollback_before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH" 2>/dev/null || true)
@@ -143,7 +165,8 @@ installed=$(podkop show_version 2>/dev/null) || abort_transaction 'installed ver
 printf 'AFTER_UPDATE=%s\n' "${installed#v}" >> "$backup/versions"
 [ "${installed#v}" = "${latest#v}" ] || abort_transaction 'installed Podkop version mismatch'
 if ! "$PODKOP_INIT" restart; then abort_transaction 'Podkop initialization failed'; fi
+wait_initialized > "$backup/verification.log" 2>&1 || abort_transaction 'Podkop initialization structure failed'
 before=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH" 2>/dev/null || true)
-if ! wait_lifecycle "$before" > "$backup/verification.log" 2>&1; then abort_transaction 'fresh Podkop/sing-box/health lifecycle failed'; fi
+if ! wait_lifecycle "$before" >> "$backup/verification.log" 2>&1; then abort_transaction 'fresh Podkop/sing-box/health lifecycle failed'; fi
 transaction_dirty=0
 printf 'Podkop updated independently. Backup: %s\n' "$backup"

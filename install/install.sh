@@ -213,13 +213,14 @@ else
 fi
 
 /etc/init.d/rpcd restart
+MONITORING_INITIALIZED_EPOCH=$(date +%s)
 # Monitoring installation does not control Podkop or sing-box. Podkop's
 # one-shot initialization may legitimately have no persistent procd process.
 verified=0
 for attempt in $(seq 1 60); do
     current_check=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
     if [ -n "$current_check" ] && [ "$current_check" != "$BEFORE_CHECK" ] &&
-        sh /usr/bin/home-net-install-verify all; then
+        HOME_NET_VERIFY_AFTER_EPOCH="$MONITORING_INITIALIZED_EPOCH" sh /usr/bin/home-net-install-verify all; then
         verified=1
         break
     fi
