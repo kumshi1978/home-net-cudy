@@ -16,7 +16,7 @@ nft_structure() {
         printf '%s\n' "$rules" | grep -Eq "$hook" || fail "Podkop nft chain $chain hook/priority invalid"
         for protocol in tcp udp; do
             case "$protocol" in tcp) number=6 ;; udp) number=17 ;; esac
-            transport="(meta l4proto|ip protocol) ($protocol|$number)"
+            transport="(meta l4proto|ip protocol) ($protocol|$number)( |$)"
             if [ "$chain" = proxy ]; then
                 pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*$transport.*tproxy ip to 127[.]0[.]0[.]1:1602( |;|$)"
                 printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $protocol TPROXY rule missing"
