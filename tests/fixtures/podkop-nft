@@ -20,6 +20,9 @@ if [ "$kind" != nohook ]; then
 fi
 if [ "$kind" != norules ]; then
  for protocol in tcp udp; do
+  if [ "$kind" = numeric ]; then
+   case "$protocol" in tcp) protocol=6 ;; udp) protocol=17 ;; esac
+  fi
   if [ "$chain" = proxy ]; then
    [ "$kind" != notproxy ] || continue
    echo "meta mark & 0x00100000 == 0x00100000 meta l4proto $protocol tproxy ip to 127.0.0.1:1602 counter packets 0 bytes 0"

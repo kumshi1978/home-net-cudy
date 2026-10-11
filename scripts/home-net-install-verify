@@ -15,17 +15,23 @@ nft_structure() {
         esac
         printf '%s\n' "$rules" | grep -Eq "$hook" || fail "Podkop nft chain $chain hook/priority invalid"
         for protocol in tcp udp; do
+            case "$protocol" in tcp) number=6 ;; udp) number=17 ;; esac
+            transport="(meta l4proto|ip protocol) ($protocol|$number)"
             if [ "$chain" = proxy ]; then
-                pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*meta l4proto $protocol.*tproxy ip to 127[.]0[.]0[.]1:1602"
+                pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*$transport.*tproxy ip to 127[.]0[.]0[.]1:1602( |;|$)"
                 printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $protocol TPROXY rule missing"
             else
                 for destination in '198[.]18[.]0[.]0/15' '@podkop_subnets'; do
-                    pattern="ip daddr $destination.*meta l4proto $protocol.*meta mark set (0x0*100000|1048576)( |$)"
+                    pattern="ip daddr $destination.*$transport.*meta mark set (0x0*100000|1048576)( |;|$)"
                     [ "$chain" != mangle ] || pattern="iifname @interfaces.*$pattern"
                     printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $chain $protocol marking rule missing"
                 done
             fi
         done
+        # Counters describe observed traffic, not configuration validity.
+        if printf '%s\n' "$rules" | grep -Eq 'counter packets 0 bytes 0'; then
+            echo "WARN: Podkop $chain has zero traffic counters; rules exist" >&2
+        fi
     done
     interfaces=$(nft -nn list set inet PodkopTable interfaces 2>/dev/null) || fail 'Podkop interface set missing'
     printf '%s' "$interfaces" | tr '\n' ' ' | grep -Eq 'elements = \{[[:space:]]*"[^" ]+"' || fail 'Podkop interface set empty'
