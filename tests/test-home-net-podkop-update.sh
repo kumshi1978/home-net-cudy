@@ -52,6 +52,7 @@ EOF
 cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
 # Simulate the next independent monitor cycle, preserving failures/status.
+[ "$(cat "$MOCK_ROOT/current")" != 0.7.24 ] || [ "${MOCK_NO_NEW_CYCLE:-0}" = 0 ] || exit 0
 stamp=$(date -d "@$(($(date +%s)-1))" '+%F %T')
 sed "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" "$MOCK_ROOT/health" > "$MOCK_ROOT/health.new"
 mv "$MOCK_ROOT/health.new" "$MOCK_ROOT/health"
@@ -135,7 +136,7 @@ echo 'PASS Podkop exact asset checksums, backup, install, fresh health and prote
 if opkg install podkop-v0.7.22-r1-all.ipk >/dev/null 2>&1; then exit 1; fi
 [ "$(cat "$TMP/current")" = 0.7.24 ]
 echo 'PASS ordinary opkg install cannot perform rollback downgrade'
-for failure in dependency install network health fakeip singbox config target lock; do
+for failure in dependency install network health fakeip singbox config cycle target lock; do
  reset
  case "$failure" in
  dependency) export MOCK_DEPENDENCY=1 ;;
@@ -145,13 +146,14 @@ for failure in dependency install network health fakeip singbox config target lo
  fakeip) export MOCK_FAKEIP=FAIL ;;
  singbox) export MOCK_NO_SING_BOX=1 ;;
  config) export MOCK_NO_CONFIG=1 ;;
+ cycle) export MOCK_NO_NEW_CYCLE=1 ;;
  lock) mkdir "$TMP/lock"; printf '%s\n' "$$" > "$TMP/lock/pid" ;;
  esac
  target=0.7.24; [ "$failure" != target ] || target=0.7.25
  if sh "$ROOT/scripts/home-net-podkop-update" update "$target" > "$TMP/result" 2>&1; then cat "$TMP/result"; exit 1; fi
  [ "$(cat "$TMP/current")" = 0.7.22 ]
  [ "$(cat "$TMP/router/etc/config/network")" = protected ]
- case "$failure" in install|network|health|fakeip|singbox|config)
+ case "$failure" in install|network|health|fakeip|singbox|config|cycle)
   grep -q rollback "$TMP/mutations"
   grep -q 'ROLLBACK VERIFIED' "$TMP/result"
   [ "$(cat "$TMP/router/etc/sing-box/config.json")" = config ]
@@ -163,7 +165,7 @@ for failure in dependency install network health fakeip singbox config target lo
   [ ! -e "$TMP/router/tmp/sing-box/new.cache" ]
   HOME_NET_VERIFY_ROOT="$TMP/router" HOME_NET_VERIFY_HEALTH="$TMP/health" sh "$ROOT/scripts/home-net-install-verify" lifecycle
   ;; *) [ ! -e "$TMP/mutations" ] ;; esac
- unset MOCK_DEPENDENCY MOCK_FAIL MOCK_CHANGE_NETWORK MOCK_HEALTH MOCK_FAKEIP MOCK_NO_SING_BOX MOCK_NO_CONFIG
+ unset MOCK_DEPENDENCY MOCK_FAIL MOCK_CHANGE_NETWORK MOCK_HEALTH MOCK_FAKEIP MOCK_NO_SING_BOX MOCK_NO_CONFIG MOCK_NO_NEW_CYCLE
  [ "$failure" != lock ] || { rm "$TMP/lock/pid"; rmdir "$TMP/lock"; }
  echo "PASS Podkop fail-closed/rollback $failure"
 done
