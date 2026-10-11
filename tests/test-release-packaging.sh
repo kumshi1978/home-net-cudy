@@ -4,8 +4,8 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/bin" "$TMP/payloads" "$TMP/target" "$TMP/backups"
-MONITORING_REF=736798dbb673d76e220e6a5b9aa47dfdfa8f01f1
-UPDATER_REF=dc0a4edfee6a57c8cf66b9d66bd54db4a6ce6505
+MONITORING_REF=$(sed -n "s/^MONITORING_BOOTSTRAP_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")
+UPDATER_REF=$(sed -n "s/^HOME_NET_UPDATER_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")
 cp "$ROOT/bundle.conf" "$TMP/payloads/bundle.conf"
 printf 'OpenWrt\n' > "$TMP/openwrt"
 printf "INSTALLED_VERSION='1.4.1'\n" > "$TMP/failover"
@@ -33,7 +33,7 @@ esac
 EOF
 cat > "$TMP/payloads/monitoring" <<'EOF'
 #!/bin/sh
-[ "$HOME_NET_RELEASE_REF" = 736798dbb673d76e220e6a5b9aa47dfdfa8f01f1 ] || exit 99
+[ "$HOME_NET_RELEASE_REF" = "$MOCK_MONITORING_REF" ] || exit 99
 EOF
 for tool in curl uci pgrep; do
     printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/$tool"
@@ -41,6 +41,7 @@ done
 chmod +x "$TMP/bin/"*
 
 run_installer() (
+    export MOCK_MONITORING_REF="$MONITORING_REF"
     export PATH="$TMP/bin:$PATH" MOCK_URL_LOG="$TMP/urls" MOCK_PAYLOADS="$TMP/payloads"
     export HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_FAILOVER_CONF="$TMP/failover"
     export HOME_NET_UPDATE_BIN="$TMP/target/updater" HOME_NET_UPDATE_INIT="$TMP/target/init"
@@ -73,11 +74,11 @@ if grep -Eq 'HOME_NET_BUNDLE_REF:-main|/main/' "$ROOT/install-all.sh"; then
     echo 'FAIL: moving main in release installer' >&2
     exit 1
 fi
-for ref in unset v1.6.0 "$UPDATER_REF"; do
+for ref in unset v1.7.0 "$UPDATER_REF"; do
     : > "$TMP/urls"
     run_installer "$ref" || { cat "$TMP/output" >&2; exit 1; }
     expected="$ref"
-    [ "$ref" != unset ] || expected=v1.6.0
+    [ "$ref" != unset ] || expected=v1.7.0
     assert_urls "$expected"
     echo "PASS release_ref_$ref"
 done
@@ -96,7 +97,7 @@ for key in MONITORING_BOOTSTRAP_REF HOME_NET_UPDATER_REF; do
     cp "$ROOT/bundle.conf" "$TMP/payloads/bundle.conf"
     sed -i "s/^$key='[^']*'/$key='main'/" "$TMP/payloads/bundle.conf"
     : > "$TMP/urls"
-    if run_installer v1.6.0; then
+    if run_installer v1.7.0; then
         echo "FAIL: accepted moving $key" >&2; exit 1
     fi
     [ "$(wc -l < "$TMP/urls")" -eq 1 ]
@@ -104,7 +105,7 @@ for key in MONITORING_BOOTSTRAP_REF HOME_NET_UPDATER_REF; do
     echo "PASS moving_$key rejected"
 done
 
-grep -Fq "HOME_NET_RELEASE_REF:-$MONITORING_REF" "$ROOT/install.sh"
+grep -Fq "HOME_NET_RELEASE_REF:-v1.7.0" "$ROOT/install.sh"
 grep -Fq "LUCI_VIEW_SRC=\"\$BASE_DIR/../luci/view/home-net/status.js\"" "$ROOT/install/install.sh"
 grep -Fq '/main/rollout-policy.conf' "$ROOT/scripts/home-net-update"
 echo 'PASS Monitoring/LuCI use pinned archive; only rollout policy remains mutable'

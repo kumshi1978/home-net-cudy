@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.6.0
+# Version: 1.7.0
 
 set -e
 
@@ -25,6 +25,8 @@ LOG_INIT_SRC="$BASE_DIR/../init.d/home-net-log"
 
 STATUS_SRC="$BASE_DIR/../scripts/home-net-status"
 CONTROL_SRC="$BASE_DIR/../scripts/home-net-control"
+MANAGEMENT_SRC="$BASE_DIR/../scripts/home-net-management"
+PODKOP_UPDATE_SRC="$BASE_DIR/../scripts/home-net-podkop-update"
 LUCI_VIEW_SRC="$BASE_DIR/../luci/view/home-net/status.js"
 LUCI_MENU_SRC="$BASE_DIR/../luci/menu.d/luci-app-home-net.json"
 LUCI_ACL_SRC="$BASE_DIR/../luci/acl.d/luci-app-home-net.json"
@@ -35,6 +37,10 @@ fail() {
 }
 
 [ -f /etc/openwrt_release ] || fail "OpenWrt not detected"
+for view in status updates logs vpn settings; do
+    [ -f "$BASE_DIR/../luci/view/home-net/$view.js" ] || fail "missing LuCI view $view"
+done
+[ -f "$BASE_DIR/../luci/home-net/common.js" ] || fail "missing LuCI shared module"
 
 check_file() {
     [ -f "$1" ] || fail "missing file $1"
@@ -55,6 +61,8 @@ for FILE in \
     "$LOG_CONF_SRC" \
     "$STATUS_SRC" \
     "$CONTROL_SRC" \
+    "$MANAGEMENT_SRC" \
+    "$PODKOP_UPDATE_SRC" \
     "$LUCI_VIEW_SRC" \
     "$LUCI_MENU_SRC" \
     "$LUCI_ACL_SRC"
@@ -73,6 +81,8 @@ for FILE in \
     "$LOG_CLI_SRC" \
     "$STATUS_SRC" \
     "$CONTROL_SRC" \
+    "$MANAGEMENT_SRC" \
+    "$PODKOP_UPDATE_SRC" \
     "$INIT_SRC" \
     "$LOG_INIT_SRC"
 do
@@ -93,6 +103,13 @@ for FILE in \
     /usr/bin/home-net-log \
     /usr/bin/home-net-status \
     /usr/bin/home-net-control \
+    /usr/bin/home-net-management \
+    /usr/bin/home-net-podkop-update \
+    /www/luci-static/resources/home-net/common.js \
+    /www/luci-static/resources/view/home-net/updates.js \
+    /www/luci-static/resources/view/home-net/logs.js \
+    /www/luci-static/resources/view/home-net/vpn.js \
+    /www/luci-static/resources/view/home-net/settings.js \
     /www/luci-static/resources/view/home-net/status.js \
     /usr/share/luci/menu.d/luci-app-home-net.json \
     /usr/share/rpcd/acl.d/luci-app-home-net.json \
@@ -119,6 +136,15 @@ cp "$LOG_INIT_SRC" /etc/init.d/home-net-log
 mkdir -p /www/luci-static/resources/view/home-net /usr/share/luci/menu.d /usr/share/rpcd/acl.d
 cp "$STATUS_SRC" /usr/bin/home-net-status
 cp "$CONTROL_SRC" /usr/bin/home-net-control
+cp "$MANAGEMENT_SRC" /usr/bin/home-net-management
+cp "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
+chmod 0755 /usr/bin/home-net-podkop-update
+chmod 0755 /usr/bin/home-net-management
+mkdir -p /www/luci-static/resources/home-net
+cp "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
+for view in updates logs vpn settings; do
+    cp "$BASE_DIR/../luci/view/home-net/$view.js" "/www/luci-static/resources/view/home-net/$view.js"
+done
 cp "$LUCI_VIEW_SRC" /www/luci-static/resources/view/home-net/status.js
 cp "$LUCI_MENU_SRC" /usr/share/luci/menu.d/luci-app-home-net.json
 cp "$LUCI_ACL_SRC" /usr/share/rpcd/acl.d/luci-app-home-net.json
@@ -165,6 +191,6 @@ fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
-echo "HOME NET Podkop Monitor v1.6.0 installed"
+echo "HOME NET Podkop Monitor v1.7.0 installed"
 echo "LuCI page: Services -> HOME NET"
 echo "Domain capture remains disabled until explicitly enabled."

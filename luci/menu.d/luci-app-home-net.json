@@ -3,11 +3,52 @@
     "title": "HOME NET",
     "order": 15,
     "action": {
-      "type": "view",
-      "path": "home-net/status"
+      "type": "firstchild"
     },
     "depends": {
-      "acl": [ "luci-app-home-net" ]
+      "acl": [
+        "luci-app-home-net"
+      ]
+    }
+  },
+  "admin/services/home-net/overview": {
+    "title": "Overview",
+    "order": 1,
+    "action": {
+      "type": "view",
+      "path": "home-net/status"
+    }
+  },
+  "admin/services/home-net/updates": {
+    "title": "Updates",
+    "order": 2,
+    "action": {
+      "type": "view",
+      "path": "home-net/updates"
+    }
+  },
+  "admin/services/home-net/logs": {
+    "title": "Logs",
+    "order": 3,
+    "action": {
+      "type": "view",
+      "path": "home-net/logs"
+    }
+  },
+  "admin/services/home-net/vpn": {
+    "title": "Vpn",
+    "order": 4,
+    "action": {
+      "type": "view",
+      "path": "home-net/vpn"
+    }
+  },
+  "admin/services/home-net/settings": {
+    "title": "Settings",
+    "order": 5,
+    "action": {
+      "type": "view",
+      "path": "home-net/settings"
     }
   }
 }

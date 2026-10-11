@@ -22,6 +22,8 @@ jobs:
           - home-net-update
           - install-all-safety
           - home-net-luci
+          - home-net-management
+          - home-net-podkop-update
           - candidate-packaging
           - release-packaging
           - component-update-policy

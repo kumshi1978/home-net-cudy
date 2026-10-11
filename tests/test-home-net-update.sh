@@ -504,7 +504,61 @@ case_stale_lock() {
     run_updater check; assert_rc 0; assert_output 'recovering stale update lock'
 }
 
+
+case_local_disabled_denies_canary() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 canary; write_state 1.5.1
+    printf "HOME_NET_ROLLOUT_RING='canary'\nHOME_NET_AUTO_UPDATE_ENABLED='0'\n" >> "$TMP/update.conf"
+    run_updater auto; assert_rc 0; assert_state INSTALLED_VERSION 1.5.1; assert_gate 'AUTO UPDATE DISABLED' 0
+}
+case_local_check_only_denies_fleet() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 fleet; write_state 1.5.1
+    printf "HOME_NET_AUTO_UPDATE_ENABLED='1'\nHOME_NET_UPDATE_MODE='check'\n" >> "$TMP/update.conf"
+    run_updater auto; assert_rc 0; assert_state INSTALLED_VERSION 1.5.1; assert_gate 'CHECK ONLY' 0
+}
+case_local_enabled_cannot_override_manual() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_policy v1.5.2 manual; write_state 1.5.1
+    printf "HOME_NET_AUTO_UPDATE_ENABLED='1'\nHOME_NET_UPDATE_MODE='apply'\n" >> "$TMP/update.conf"
+    run_updater auto; assert_rc 0; assert_state INSTALLED_VERSION 1.5.1; assert_gate 'WAITING FOR CANARY' 0
+}
+case_critical_auto_never_installs() {
+    reset_case; enable_new_model; write_release 1.5.2 false false v1.5.2 CRITICAL reboot required; write_policy v1.5.2 fleet; write_state 1.5.1
+    printf "HOME_NET_AUTO_UPDATE_ENABLED='1'\n" >> "$TMP/update.conf"
+    run_updater auto; assert_rc 0; assert_state INSTALLED_VERSION 1.5.1; assert_state ACTIVE_VERSION 1.5.1
+    assert_gate 'MANUAL INTERVENTION REQUIRED' 0
+}
+case_manual_health_cannot_be_forced() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1; write_health FAIL before
+    HOME_NET_FORCE=1 run_updater apply
+    [ "$RUN_RC" -ne 0 ]; assert_state INSTALLED_VERSION 1.5.1
+    assert_output 'pre-install health is FAIL'
+}
+case_backup_failure_prevents_installer() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    mv "$TMP/backups" "$TMP/backups.saved"; printf 'blocked' > "$TMP/backups"
+    run_updater apply
+    [ "$RUN_RC" -ne 0 ]; assert_state INSTALLED_VERSION 1.5.1; assert_output 'cannot create backup directory'
+    rm "$TMP/backups"; mv "$TMP/backups.saved" "$TMP/backups"
+}
+case_live_lock_prevents_manual_install() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    mkdir "$TMP/lock"; printf '%s\n' "$$" > "$TMP/lock/pid"
+    run_updater apply; assert_rc 0; assert_state INSTALLED_VERSION 1.5.1; assert_output 'already running'
+}
+case_confirmation_target_must_match() {
+    reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1
+    HOME_NET_CONFIRMED_RELEASE=v1.5.3 run_updater apply
+    [ "$RUN_RC" -ne 0 ]; assert_state INSTALLED_VERSION 1.5.1; assert_output 'latest release changed'
+}
+
 for test_case in \
+    case_local_disabled_denies_canary \
+    case_local_check_only_denies_fleet \
+    case_local_enabled_cannot_override_manual \
+    case_critical_auto_never_installs \
+    case_manual_health_cannot_be_forced \
+    case_backup_failure_prevents_installer \
+    case_live_lock_prevents_manual_install \
+    case_confirmation_target_must_match \
     case_no_update \
     case_update_available \
     case_no_downgrade \

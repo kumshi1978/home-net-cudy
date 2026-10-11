@@ -1,0 +1,80 @@
+#!/bin/sh
+# HOME NET v1.7.0 management operations. Arguments are data, never shell commands.
+set -eu
+CONF=${HOME_NET_UPDATE_CONF:-/etc/home-net-update.conf}
+UPDATER=${HOME_NET_MANAGEMENT_UPDATER:-/usr/bin/home-net-update}
+LOCK=${HOME_NET_UPDATE_LOCK_DIR:-/var/run/home-net-update.lock}
+CACHE=${HOME_NET_MANAGEMENT_CACHE:-/tmp/home-net-management}
+BACKUPS=${HOME_NET_MANAGEMENT_BACKUPS:-/root}
+fail() { echo "ERROR: $*" >&2; exit 1; }
+clock() { printf '%s\n' "$1" | grep -Eq '^([01][0-9]|2[0-3]):[0-5][0-9]$'; }
+value() { [ ! -r "$CONF" ] || sed -n "s/^$1='\([^']*\)'$/\1/p" "$CONF" | tail -n 1; }
+locked() {
+    mkdir "$LOCK" 2>/dev/null || fail 'another operation holds the update lock'
+    printf '%s\n' "$$" > "$LOCK/pid"
+    trap 'rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null || true' EXIT
+    trap 'exit 1' HUP INT TERM
+}
+settings() {
+    for key in HOME_NET_AUTO_UPDATE_ENABLED HOME_NET_UPDATE_MODE HOME_NET_UPDATE_TIME HOME_NET_UPDATE_WINDOW_START HOME_NET_UPDATE_WINDOW_END HOME_NET_UPDATE_JITTER; do
+        printf '%s=%s\n' "$key" "$(value "$key")"
+    done
+}
+save_settings() {
+    [ "$#" = 6 ] || fail 'six settings required'
+    case "$1" in 0|1) ;; *) fail 'enabled must be 0 or 1' ;; esac
+    case "$2" in check|apply) ;; *) fail 'mode must be check or apply' ;; esac
+    clock "$3" && clock "$4" && clock "$5" || fail 'times must be HH:MM'
+    case "$6" in ''|*[!0-9]*|?????) fail 'invalid jitter minutes' ;; esac
+    [ "$6" -le 1440 ] || fail 'jitter exceeds one day'
+    locked
+    umask 077
+    mkdir -p "$BACKUPS"
+    backup="$BACKUPS/home-net-settings-$(date +%Y%m%d-%H%M%S)-$$"
+    mkdir "$backup" || fail 'cannot create backup'
+    [ ! -f "$CONF" ] || cp -p "$CONF" "$backup/" || fail 'backup failed'
+    tmp="$CONF.new.$$"
+    # Preserve role, capability, policy URL and all unrelated options verbatim.
+    { [ ! -r "$CONF" ] || grep -Ev '^HOME_NET_(AUTO_UPDATE_ENABLED|UPDATE_MODE|UPDATE_TIME|UPDATE_WINDOW_START|UPDATE_WINDOW_END|UPDATE_JITTER)=' "$CONF" || true
+      printf "HOME_NET_AUTO_UPDATE_ENABLED='%s'\nHOME_NET_UPDATE_MODE='%s'\nHOME_NET_UPDATE_TIME='%s'\nHOME_NET_UPDATE_WINDOW_START='%s'\nHOME_NET_UPDATE_WINDOW_END='%s'\nHOME_NET_UPDATE_JITTER='%s'\n" "$1" "$2" "$3" "$4" "$5" "$(awk -v minutes="$6" 'BEGIN {print minutes * 60}')"
+    } > "$tmp"
+    sh -n "$tmp" || { rm -f "$tmp"; fail 'settings syntax invalid'; }
+    chmod 0600 "$tmp"
+    mv "$tmp" "$CONF"
+    echo 'Local restrictions saved; Git policy and safety gates remain mandatory.'
+}
+preview() {
+    mkdir -p "$CACHE"
+    umask 077
+    preview_work=$(mktemp -d "$CACHE/preview.XXXXXX")
+    trap 'rm -rf "$preview_work"' EXIT
+    curl -fsSL --connect-timeout 10 --max-time 30 'https://api.github.com/repos/kumshi1978/home-net-cudy/releases/latest' -o "$preview_work/release.new"
+    tag=$(jsonfilter -i "$preview_work/release.new" -e '@.tag_name')
+    printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'invalid release tag'
+    [ "$(jsonfilter -i "$preview_work/release.new" -e '@.draft')" = false ] || fail 'draft release'
+    [ "$(jsonfilter -i "$preview_work/release.new" -e '@.prerelease')" = false ] || fail 'prerelease'
+    curl -fsSL --connect-timeout 10 --max-time 30 "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$tag/bundle.conf" -o "$preview_work/bundle.new"
+    class=$(sed -n "s/^UPDATE_ACTION_CLASS='\([^']*\)'$/\1/p" "$preview_work/bundle.new" | tail -n 1)
+    case "$class" in SAFE|CONTROLLED|CRITICAL) ;; *) fail 'invalid release class' ;; esac
+    grep -Fxq "HOME_NET_BUNDLE_VERSION='${tag#v}'" "$preview_work/bundle.new" || fail 'manifest version mismatch'
+    printf 'TARGET=%s\nCLASS=%s\n' "$tag" "$class"
+}
+install_latest() {
+    [ "$#" = 1 ] || fail 'confirmed target required'
+    target="$1"
+    printf '%s\n' "$target" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'invalid target'
+    metadata=$(preview) || fail 'release preview failed'
+    [ "$(printf '%s\n' "$metadata" | sed -n 's/^TARGET=//p')" = "$target" ] || fail 'latest release changed; confirm again'
+    [ "$(printf '%s\n' "$metadata" | sed -n 's/^CLASS=//p')" != CRITICAL ] || fail 'Manual intervention required'
+    # Real updater obtains lock, preflight/health, backup, install and fresh health.
+    HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE="$target" "$UPDATER" apply
+}
+case "${1:-}" in
+ settings) settings ;;
+ save-settings) shift; save_settings "$@" ;;
+ preview) preview ;;
+ install-latest) shift; install_latest "$@" ;;
+ podkop-check) /usr/bin/home-net-podkop-update check ;;
+ podkop-update) [ "$#" = 2 ] || fail 'confirmed Podkop target required'; /usr/bin/home-net-podkop-update update "$2" ;;
+ *) fail 'unknown management action' ;;
+esac
