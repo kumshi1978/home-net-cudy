@@ -175,10 +175,15 @@ real downgrade semantics, partial update/full file restoration and unhealthy rol
 Hardware lifecycle and rollback still require a backup-only canary test.
 
 Round 2 validation requires mangle/prerouting (-150), mangle_output/output
-(-150) and proxy/prerouting (-100), TCP/UDP FakeIP and subnet marking, TCP/UDP
+(-150) and proxy/prerouting (-100), TCP/UDP subnet-set marking, TCP/UDP
 TPROXY to 127.0.0.1:1602, and a nonempty interfaces set. Empty tables, missing
 hooks or missing interception rules fail. This is configuration inspection only;
 the verifier does not generate test traffic.
+Counters are diagnostics only: zero packets/bytes produces WARN, never FAIL.
+Standby Cudy can legitimately have zero prerouting counters. Symbolic tcp/udp
+and numeric 6/17 protocols are accepted. Separate literal FakeIP-range marking
+rules are not mandatory when the installed variant uses subnet-set marking.
+Device role is not inferred from counters; no authoritative role input is added.
 
 After restart, update/rollback first wait for the initialized nft/routing/proxy
 structure, then record an epoch boundary. The completed monitoring cycle must
