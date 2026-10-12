@@ -24,6 +24,7 @@ jobs:
           - home-net-luci
           - home-net-install-verify
           - luci-detached-upgrade
+          - podkop-background
           - home-net-management
           - home-net-podkop-update
           - candidate-packaging

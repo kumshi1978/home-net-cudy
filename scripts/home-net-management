@@ -3,6 +3,7 @@
 set -eu
 CONF=${HOME_NET_UPDATE_CONF:-/etc/home-net-update.conf}
 UPDATER=${HOME_NET_MANAGEMENT_UPDATER:-/usr/bin/home-net-update}
+PODKOP_UPDATER=${HOME_NET_MANAGEMENT_PODKOP_UPDATER:-/usr/bin/home-net-podkop-update}
 LOCK=${HOME_NET_UPDATE_LOCK_DIR:-/var/run/home-net-update.lock}
 CACHE=${HOME_NET_MANAGEMENT_CACHE:-/tmp/home-net-management}
 BACKUPS=${HOME_NET_MANAGEMENT_BACKUPS:-/root}
@@ -59,6 +60,26 @@ preview() {
     grep -Fxq "HOME_NET_BUNDLE_VERSION='${tag#v}'" "$preview_work/bundle.new" || fail 'manifest version mismatch'
     printf 'TARGET=%s\nCLASS=%s\n' "$tag" "$class"
 }
+launch_slot() {
+    mkdir -p "$CACHE"
+    slot="$CACHE/launch.lock"
+    if ! mkdir "$slot" 2>/dev/null; then
+        pid=$(cat "$slot/pid" 2>/dev/null || true)
+        case "$pid" in ''|*[!0-9]*) fail 'another launch is being prepared' ;; esac
+        kill -0 "$pid" 2>/dev/null && fail 'another launch is being prepared'
+        rm -f "$slot/pid"
+        rmdir "$slot" || fail 'cannot recover launch lock'
+        mkdir "$slot" || fail 'another launch is being prepared'
+    fi
+    printf '%s\n' "$$" > "$slot/pid"
+    trap 'rm -f "$slot/pid"; rmdir "$slot"' EXIT
+    trap 'exit 1' HUP INT TERM
+    for pointer in install-job podkop-job; do
+        status=$(install_status "$pointer") || fail 'cannot inspect existing job'
+        case "$status" in *'STATUS=QUEUED'*|*'STATUS=RUNNING'*) fail 'another update is in progress' ;; esac
+    done
+    [ ! -d "$LOCK" ] || fail 'another operation holds the update lock'
+}
 install_latest() {
     [ "$#" = 1 ] || fail 'confirmed target required'
     target="$1"
@@ -67,6 +88,7 @@ install_latest() {
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^TARGET=//p')" = "$target" ] || fail 'latest release changed; confirm again'
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^CLASS=//p')" != CRITICAL ] || fail 'Manual intervention required'
     [ -x "$UPDATER" ] || fail 'updater is not executable'
+    launch_slot
     umask 077
     mkdir -p "$CACHE/jobs"
     job=$(mktemp -d "$CACHE/jobs/install.XXXXXX")
@@ -100,9 +122,11 @@ WORKER
     echo 'Installation started in the background. Refresh Updates to check Installed/Active and health.'
 }
 install_status() {
-    [ -r "$CACHE/install-job" ] || { echo 'STATUS=NONE'; return; }
-    job=$(cat "$CACHE/install-job")
-    case "$job" in "$CACHE"/jobs/install.*) ;; *) fail 'invalid job record' ;; esac
+    pointer=${1:-install-job}
+    case "$pointer" in install-job) prefix="$CACHE/jobs/install." ;; podkop-job) prefix="$CACHE/jobs/podkop." ;; *) fail 'invalid job kind' ;; esac
+    [ -r "$CACHE/$pointer" ] || { echo 'STATUS=NONE'; return; }
+    job=$(cat "$CACHE/$pointer")
+    case "$job" in "$prefix"*) ;; *) fail 'invalid job record' ;; esac
     [ -d "$job" ] && [ ! -L "$job" ] || fail 'missing job directory'
     status=$(cat "$job/status")
     case "$status" in QUEUED|RUNNING)
@@ -116,6 +140,51 @@ install_status() {
     printf 'STATUS=%s\nTARGET=%s\n' "$status" "$(cat "$job/target")"
     printf 'DIAGNOSTICS=%s/output.log\n' "$job"
     [ ! -r "$job/exit-code" ] || printf 'EXIT_CODE=%s\n' "$(cat "$job/exit-code")"
+    [ ! -r "$job/version" ] || printf 'CURRENT_VERSION=%s\n' "$(cat "$job/version")"
+}
+podkop_update() {
+    [ "$#" = 1 ] || fail 'confirmed Podkop target required'
+    target="$1"
+    printf '%s\n' "$target" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$' || fail 'invalid Podkop target'
+    [ -x "$PODKOP_UPDATER" ] || fail 'Podkop updater is not executable'
+    metadata=$("$PODKOP_UPDATER" check) || fail 'Podkop release check failed'
+    latest=$(printf '%s\n' "$metadata" | sed -n 's/^LATEST=//p')
+    current=$(printf '%s\n' "$metadata" | sed -n 's/^CURRENT=//p')
+    [ "$target" = "$latest" ] || fail 'latest Podkop changed; confirm again'
+    [ "${target#v}" != "${current#v}" ] || fail 'Podkop already current'
+    launch_slot
+    umask 077
+    mkdir -p "$CACHE/jobs"
+    job=$(mktemp -d "$CACHE/jobs/podkop.XXXXXX")
+    printf '%s\n' "$target" > "$job/target"
+    printf 'QUEUED\n' > "$job/status"
+    cat > "$job/worker.sh" <<'WORKER'
+#!/bin/sh
+set -u
+job=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+printf 'RUNNING\n' > "$job/status.new"
+mv "$job/status.new" "$job/status"
+# The existing transaction still owns the shared update lock, package plans,
+# backups, checksums, configuration protection and verified rollback.
+if "$2" update "$1"; then rc=0; else rc=$?; fi
+version=$(podkop show_version 2>/dev/null || true)
+printf '%s\n' "${version#v}" > "$job/version"
+if [ "$rc" = 0 ] && [ "${version#v}" = "${1#v}" ]; then result=SUCCEEDED; else result=FAILED; fi
+printf '%s\n' "$rc" > "$job/exit-code"
+printf '%s\n' "$result" > "$job/status.new"
+mv "$job/status.new" "$job/status"
+WORKER
+    chmod 0700 "$job/worker.sh"
+    (trap '' HUP; exec sh "$job/worker.sh" "$target" "$PODKOP_UPDATER") > "$job/output.log" 2>&1 </dev/null &
+    printf '%s\n' "$!" > "$job/pid"
+    printf '%s\n' "$job" > "$CACHE/podkop-job.new.$$"
+    mv "$CACHE/podkop-job.new.$$" "$CACHE/podkop-job"
+    echo 'Podkop update started in the background. Refresh Updates for the result.'
+}
+podkop_log() {
+    install_status podkop-job >/dev/null
+    [ -r "$CACHE/podkop-job" ] || { echo 'No Podkop update recorded.'; return; }
+    tail -n 200 "$(cat "$CACHE/podkop-job")/output.log"
 }
 case "${1:-}" in
  settings) settings ;;
@@ -123,7 +192,9 @@ case "${1:-}" in
  preview) preview ;;
  install-latest) shift; install_latest "$@" ;;
  install-status) install_status ;;
- podkop-check) /usr/bin/home-net-podkop-update check ;;
- podkop-update) [ "$#" = 2 ] || fail 'confirmed Podkop target required'; /usr/bin/home-net-podkop-update update "$2" ;;
+ podkop-check) "$PODKOP_UPDATER" check ;;
+ podkop-update) shift; podkop_update "$@" ;;
+ podkop-status) install_status podkop-job ;;
+ podkop-log) podkop_log ;;
  *) fail 'unknown management action' ;;
 esac

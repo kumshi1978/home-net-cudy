@@ -39,12 +39,19 @@ function updatePage(s) {
     function decisionRows(){return [row('Latest release',s.LATEST_RELEASE),row('Release class',s.RELEASE_ACTION_CLASS),row('Release rollout',s.RELEASE_ROLLOUT),row('Roll out ring',s.UPDATE_RING),row('Auto-update capable',s.AUTO_UPDATE_CAPABLE),row('AutoApply',s.AUTO_APPLY_ALLOWED),badge(s.AUTO_APPLY_STATE),row('Policy',s.ROLLOUT_POLICY_STATUS)];}
     var decision=E('div',{},decisionRows());
     function refreshDecision(){return fs.exec('/usr/bin/home-net-status',['status']).then(function(r){if(r.code)throw Error(r.stderr);s=parse(r.stdout);decision.replaceChildren.apply(decision,decisionRows());});}
-    function refreshInstallation(){return Promise.all([refreshDecision(),fs.exec('/usr/bin/home-net-management',['install-status'])]).then(function(results){
+    function refreshInstallation(){return Promise.all([refreshDecision(),fs.exec('/usr/bin/home-net-management',['install-status']),fs.exec('/usr/bin/home-net-management',['podkop-status'])]).then(function(results){
         var r=results[1];if(r.code)throw Error(r.stderr);var job=parse(r.stdout);jobStatus=job.STATUS || 'NONE';
         var labels={NONE:'No background installation recorded.',QUEUED:'Installation queued',RUNNING:'Installation in progress',SUCCEEDED:'Installation completed',FAILED:'Installation failed; check Logs and current version',INTERRUPTED:'Installation worker interrupted; check Logs and current version'};
         progress.replaceChildren(E('p',{},labels[jobStatus] || 'Installation state unknown'),row('Target',job.TARGET));
         current.replaceChildren.apply(current,currentRows());
-        install.disabled=/^(QUEUED|RUNNING)$/.test(jobStatus) || !/^(SAFE|CONTROLLED)$/.test(preview.CLASS);
+        r=results[2];if(r.code)throw Error(r.stderr);var podkopJob=parse(r.stdout);podkopJobStatus=podkopJob.STATUS || 'NONE';
+        var podkopLabels={NONE:'No Podkop update recorded.',QUEUED:'Podkop update queued',RUNNING:'Podkop update in progress',SUCCEEDED:'Podkop update completed',FAILED:'Podkop update failed; open update log for rollback details',INTERRUPTED:'Podkop update interrupted; check version and update log'};
+        podkopProgress.replaceChildren(E('p',{},podkopLabels[podkopJobStatus] || 'Podkop update state unknown'),row('Target',podkopJob.TARGET));
+        podkopCurrent=s.PODKOP_VERSION || podkopJob.CURRENT_VERSION || podkopCurrent;
+        podkopDetails.replaceChildren(row('Current version',podkopCurrent),row('Latest version',podkopTarget));
+        var busy=/^(QUEUED|RUNNING)$/.test(jobStatus) || /^(QUEUED|RUNNING)$/.test(podkopJobStatus);
+        install.disabled=busy || !/^(SAFE|CONTROLLED)$/.test(preview.CLASS);
+        podkopInstall.disabled=busy || !podkopTarget || String(podkopCurrent).replace(/^v/,'')===String(podkopTarget).replace(/^v/,'');
     });}
     var install = button('Install latest release',function(){
         if(!preview.TARGET || !/^(SAFE|CONTROLLED)$/.test(preview.CLASS)) return;
@@ -56,19 +63,20 @@ function updatePage(s) {
             button('Confirm installation',function(){ui.hideModal(); install.disabled=true;return execute('install-latest',[preview.TARGET]).then(function(text){notify(text);return refreshInstallation();}).catch(function(){install.disabled=false;});})
         ]);
     },true);
-    function check(){return execute('preview').then(function(text){preview=parse(text);details.replaceChildren(row('Target',preview.TARGET),row('Release class',preview.CLASS));install.disabled=/^(QUEUED|RUNNING)$/.test(jobStatus) || !/^(SAFE|CONTROLLED)$/.test(preview.CLASS);if(preview.CLASS === 'CRITICAL')details.appendChild(E('p',{},'Manual intervention required'));});}
-    var podkopTarget=null, podkopDetails=E('div',{},row('Current version',s.PODKOP_VERSION));
+    function check(){return execute('preview').then(function(text){preview=parse(text);details.replaceChildren(row('Target',preview.TARGET),row('Release class',preview.CLASS));install.disabled=/^(QUEUED|RUNNING)$/.test(jobStatus) || /^(QUEUED|RUNNING)$/.test(podkopJobStatus) || !/^(SAFE|CONTROLLED)$/.test(preview.CLASS);if(preview.CLASS === 'CRITICAL')details.appendChild(E('p',{},'Manual intervention required'));});}
+    var podkopTarget=null, podkopCurrent=s.PODKOP_VERSION, podkopJobStatus='NONE', podkopDetails=E('div',{},row('Current version',s.PODKOP_VERSION));
+    var podkopProgress=E('div',{},'No Podkop update recorded.'), podkopLog=E('pre',{style:'max-height:400px;overflow:auto;white-space:pre-wrap'},'');
     var podkopInstall=button('Update Podkop',function(){
         if(!podkopTarget)return;
         if(!window.confirm('Update Podkop to '+podkopTarget+'? Backup, checksums, dependency preflight, protected configuration checks and fresh health are required. Rollback packages must be available.'))return;
         podkopInstall.disabled=true;
-        return execute('podkop-update',[podkopTarget]).then(notify).finally(function(){podkopInstall.disabled=false;});
+        return execute('podkop-update',[podkopTarget]).then(function(text){notify(text);return refreshInstallation();}).catch(function(){return refreshInstallation().catch(function(){});});
     },true);
     poll.add(function(){return refreshInstallation().catch(function(){});},5);
     return E('div',{},[
         block('Current',[current,progress]),
         block('Release and decision',[decision,details,button('Check for update',function(){return fs.exec('/usr/bin/home-net-control',['update-check']).then(function(r){if(r.code)throw Error(r.stderr);return refreshDecision().then(check);}).catch(function(e){notify(String(e));});}),install]),
-        block('Podkop',[podkopDetails,button('Check Podkop update',function(){return execute('podkop-check').then(function(t){var p=parse(t);podkopTarget=p.LATEST;podkopInstall.disabled=!/^v?[0-9]+\.[0-9]+\.[0-9]+$/.test(p.LATEST || '') || p.CURRENT===p.LATEST;podkopDetails.replaceChildren(row('Current version',p.CURRENT),row('Latest version',p.LATEST));});}),podkopInstall,E('p',{},'Podkop is independent of the HOME NET bundle. Installation fails closed if exact rollback assets, digests, dependencies or required configuration are unavailable.')])
+        block('Podkop',[podkopDetails,podkopProgress,button('Check Podkop update',function(){return execute('podkop-check').then(function(t){var p=parse(t);podkopTarget=p.LATEST;podkopCurrent=p.CURRENT;podkopInstall.disabled=/^(QUEUED|RUNNING)$/.test(jobStatus) || /^(QUEUED|RUNNING)$/.test(podkopJobStatus) || !/^v?[0-9]+\.[0-9]+\.[0-9]+$/.test(p.LATEST || '') || String(p.CURRENT).replace(/^v/,'')===String(p.LATEST).replace(/^v/,'');podkopDetails.replaceChildren(row('Current version',p.CURRENT),row('Latest version',p.LATEST));});}),podkopInstall,button('Show Podkop update log',function(){return execute('podkop-log').then(function(text){podkopLog.textContent=text;});}),podkopLog,E('p',{},'Podkop is independent of the HOME NET bundle. Installation fails closed if exact rollback assets, digests, dependencies or required configuration are unavailable.')])
     ]);
 }
 function settingsPage(values){
