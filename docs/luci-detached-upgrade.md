@@ -21,7 +21,7 @@ Source: https://github.com/openwrt/rpcd/blob/master/file.c.
    that updater first. The full Monitoring/bootstrap output and bundle exit
    status survive RPC expiration. Journal: `/root/home-net-luci-install-*.log`.
 2. The new management backend validates the confirmed target and CRITICAL
-   restriction, then starts a nohup worker with stdin disconnected and output
+   restriction, then starts a worker with SIGHUP ignored, stdin disconnected and output
    redirected to a private job log. It returns immediately. The worker invokes
    the actual updater, which remains the sole owner of locking, preflight,
    backup, rollout/class restrictions, health and Installed/Active records.

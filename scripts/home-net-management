@@ -66,7 +66,6 @@ install_latest() {
     metadata=$(preview) || fail 'release preview failed'
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^TARGET=//p')" = "$target" ] || fail 'latest release changed; confirm again'
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^CLASS=//p')" != CRITICAL ] || fail 'Manual intervention required'
-    command -v nohup >/dev/null 2>&1 || fail 'nohup is required for background installation'
     [ -x "$UPDATER" ] || fail 'updater is not executable'
     umask 077
     mkdir -p "$CACHE/jobs"
@@ -92,7 +91,9 @@ printf '%s\n' "$result" > "$job/status.new"
 mv "$job/status.new" "$job/status"
 WORKER
     chmod 0700 "$job/worker.sh"
-    nohup sh "$job/worker.sh" "$target" "$UPDATER" > "$job/output.log" 2>&1 </dev/null &
+    # POSIX sh provides nohup's signal protection without requiring an optional
+    # BusyBox applet. exec retains the ignored HUP disposition in the worker.
+    (trap '' HUP; exec sh "$job/worker.sh" "$target" "$UPDATER") > "$job/output.log" 2>&1 </dev/null &
     printf '%s\n' "$!" > "$job/pid"
     printf '%s\n' "$job" > "$CACHE/install-job.new.$$"
     mv "$CACHE/install-job.new.$$" "$CACHE/install-job"

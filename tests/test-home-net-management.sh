@@ -74,6 +74,8 @@ echo 'fixture: retained worker output'
 printf "INSTALLED_VERSION='1.7.3'\nACTIVE_VERSION='1.7.3'\nUPDATE_STATUS='OK'\n" > "$HOME_NET_UPDATE_STATE_FILE"
 EOF
 chmod 0755 "$TMP/bin/"* "$TMP/updater"
+printf '#!/bin/sh\nexit 127\n' > "$TMP/bin/nohup"
+chmod 0755 "$TMP/bin/nohup"
 export PATH="$TMP/bin:$PATH" HOME_NET_MANAGEMENT_CACHE="$TMP/jobs-cache"
 export HOME_NET_MANAGEMENT_UPDATER="$TMP/updater" HOME_NET_UPDATE_STATE_FILE="$TMP/job-state"
 sh "$ROOT/scripts/home-net-management" install-status | grep -Fxq STATUS=NONE
@@ -86,6 +88,8 @@ for outcome in success failure; do
  grep -q 'started in the background' "$TMP/launch-output"
  for attempt in $(seq 1 500); do [ ! -f "$MOCK_JOB_GATE/started" ] || break; sleep 0.01; done
  [ -f "$MOCK_JOB_GATE/started" ]
+ job=$(cat "$HOME_NET_MANAGEMENT_CACHE/install-job")
+ kill -HUP "$(cat "$job/pid")"
  sh "$ROOT/scripts/home-net-management" install-status | grep -Fxq STATUS=RUNNING
  grep -Fxq "INSTALLED_VERSION='1.6.0'" "$HOME_NET_UPDATE_STATE_FILE"
  touch "$MOCK_JOB_GATE/released"
@@ -103,4 +107,4 @@ before=$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d 
 if MOCK_CLASS=CRITICAL sh "$ROOT/scripts/home-net-management" install-latest v1.7.3; then exit 1; fi
 if sh "$ROOT/scripts/home-net-management" install-latest v1.7.2; then exit 1; fi
 [ "$before" = "$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)" ]
-echo 'PASS background launch returns before install finishes; private output and success/failure status retained; target/CRITICAL checks stay synchronous'
+echo 'PASS background launch survives HUP without nohup, returns promptly and retains private output/final state; target/CRITICAL checks stay synchronous'
