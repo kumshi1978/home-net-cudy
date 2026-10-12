@@ -1,6 +1,7 @@
 # Sourced after the existing isolated Monitoring fixture is prepared.
 mkdir "$TMP/rpc-payloads"
 cp "$TMP/install.fixture" "$TMP/src/install/install.sh"
+cp "$REPO/MONITORING_VERSION" "$TMP/src/MONITORING_VERSION"
 tar -czf "$TMP/rpc-payloads/archive.tar.gz" -C "$TMP" src
 sed "s|/etc/openwrt_release|$TMP/root/etc/openwrt_release|g" "$REPO/install.sh" > "$TMP/rpc-payloads/bootstrap"
 cp "$REPO/install-all.sh" "$TMP/rpc-payloads/bundle-installer"
@@ -70,7 +71,12 @@ for outcome in success failure; do
   "$HOME_NET_TEST_REAL_SLEEP" 0.01
  done
  if [ "$outcome" = success ]; then
-  grep -Fxq "INSTALLED_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"
+  if ! grep -Fxq "INSTALLED_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"; then
+   cat "$HOME_NET_UPDATE_STATE_FILE"
+   cat "$MOCK_RPC_GATE/request-output"
+   for diagnostic in "$TMP/backups"/home-net-luci-install-*.log; do [ ! -f "$diagnostic" ] || cat "$diagnostic"; done
+   exit 1
+  fi
   grep -Fxq "ACTIVE_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"
   grep -Fxq "UPDATE_STATUS='OK'" "$HOME_NET_UPDATE_STATE_FILE"
  else

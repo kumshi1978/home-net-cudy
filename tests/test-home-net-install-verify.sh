@@ -107,7 +107,6 @@ exec "$HOME_NET_TEST_REAL_CP" "$@"
 EOF
 chmod 0755 "$TMP/bin/cp"
 if [ "${HOME_NET_TEST_LUCI_UPGRADE:-0}" = 1 ]; then
- set -x
  . "$REPO/tests/fixtures/luci-detached-upgrade"
  exit 0
 fi
