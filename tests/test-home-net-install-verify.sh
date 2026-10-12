@@ -25,6 +25,14 @@ echo /etc/sing-box/config.json
 EOF
 cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
+if [ -n "${MOCK_RPC_GATE:-}" ] && [ ! -f "$MOCK_RPC_GATE/closed" ]; then
+ touch "$MOCK_RPC_GATE/ready"
+ for attempt in $(seq 1 500); do
+  [ ! -f "$MOCK_RPC_GATE/closed" ] || break
+  "$HOME_NET_TEST_REAL_SLEEP" 0.01
+ done
+ [ -f "$MOCK_RPC_GATE/closed" ] || exit 1
+fi
 epoch=$(($(date +%s)+${MOCK_WAIT_STEP:-2}))
 printf '%s\n' "$epoch" > "$HOME_NET_TEST_CLOCK_FILE"
 [ -f "$HOME_NET_VERIFY_ROOT/podkop-service-health.running" ] || exit 0
@@ -98,6 +106,10 @@ fi
 exec "$HOME_NET_TEST_REAL_CP" "$@"
 EOF
 chmod 0755 "$TMP/bin/cp"
+if [ "${HOME_NET_TEST_LUCI_UPGRADE:-0}" = 1 ]; then
+ . "$REPO/tests/fixtures/luci-detached-upgrade"
+ exit 0
+fi
 if (umask 077; FAIL_LUCI_COPY=1 sh "$TMP/install.ready") > "$TMP/partial-output" 2>&1; then exit 1; fi
 grep -q 'fixture: LuCI copy failed' "$TMP/partial-output"
 sh "$REPO/scripts/home-net-install-verify" runtime
@@ -118,7 +130,7 @@ echo 'PASS actual installer under umask 077; one-shot Podkop accepted without se
 printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/home-net-update.state"
 cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
 MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
-grep -q 'HOME NET Podkop Monitor v1.7.2 installed' "$TMP/race-output"
+grep -q 'HOME NET Podkop Monitor v1.7.3 installed' "$TMP/race-output"
 if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
 cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'

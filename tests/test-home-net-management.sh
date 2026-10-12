@@ -46,3 +46,61 @@ sh -n "$ROOT/scripts/home-net-management"
 sh -n "$ROOT/scripts/home-net-podkop-update"
 node "$ROOT/tests/test-luci-management.cjs"
 echo 'PASS local settings validation/preservation/backup/lock and cross-midnight time gates'
+mkdir "$TMP/bin" "$TMP/jobs-cache"
+cat > "$TMP/bin/curl" <<'EOF'
+#!/bin/sh
+for argument do output="$argument"; done
+case "$*" in
+ *releases/latest*) printf '{"tag_name":"v1.7.3","draft":false,"prerelease":false}\n' > "$output" ;;
+ */bundle.conf) printf "HOME_NET_BUNDLE_VERSION='1.7.3'\nUPDATE_ACTION_CLASS='%s'\n" "${MOCK_CLASS:-SAFE}" > "$output" ;;
+ *) exit 1 ;;
+esac
+EOF
+cat > "$TMP/bin/jsonfilter" <<'EOF'
+#!/bin/sh
+case "$*" in *tag_name*) echo v1.7.3 ;; *draft*|*prerelease*) echo false ;; *) exit 1 ;; esac
+EOF
+cat > "$TMP/updater" <<'EOF'
+#!/bin/sh
+[ "$1" = apply ] && [ "$HOME_NET_MANAGEMENT_CONTEXT" = 1 ] && [ "$HOME_NET_CONFIRMED_RELEASE" = v1.7.3 ] || exit 99
+touch "$MOCK_JOB_GATE/started"
+for attempt in $(seq 1 500); do
+ [ ! -f "$MOCK_JOB_GATE/released" ] || break
+ sleep 0.01
+done
+[ -f "$MOCK_JOB_GATE/released" ] || exit 99
+echo 'fixture: retained worker output'
+[ "${MOCK_JOB_FAILURE:-0}" = 0 ] || { echo 'fixture: updater failed' >&2; exit 23; }
+printf "INSTALLED_VERSION='1.7.3'\nACTIVE_VERSION='1.7.3'\nUPDATE_STATUS='OK'\n" > "$HOME_NET_UPDATE_STATE_FILE"
+EOF
+chmod 0755 "$TMP/bin/"* "$TMP/updater"
+export PATH="$TMP/bin:$PATH" HOME_NET_MANAGEMENT_CACHE="$TMP/jobs-cache"
+export HOME_NET_MANAGEMENT_UPDATER="$TMP/updater" HOME_NET_UPDATE_STATE_FILE="$TMP/job-state"
+sh "$ROOT/scripts/home-net-management" install-status | grep -Fxq STATUS=NONE
+for outcome in success failure; do
+ export MOCK_JOB_GATE="$TMP/job-$outcome"
+ mkdir "$MOCK_JOB_GATE"
+ printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\nUPDATE_STATUS='OK'\n" > "$HOME_NET_UPDATE_STATE_FILE"
+ [ "$outcome" != failure ] || export MOCK_JOB_FAILURE=1
+ sh "$ROOT/scripts/home-net-management" install-latest v1.7.3 > "$TMP/launch-output"
+ grep -q 'started in the background' "$TMP/launch-output"
+ for attempt in $(seq 1 500); do [ ! -f "$MOCK_JOB_GATE/started" ] || break; sleep 0.01; done
+ [ -f "$MOCK_JOB_GATE/started" ]
+ sh "$ROOT/scripts/home-net-management" install-status | grep -Fxq STATUS=RUNNING
+ grep -Fxq "INSTALLED_VERSION='1.6.0'" "$HOME_NET_UPDATE_STATE_FILE"
+ touch "$MOCK_JOB_GATE/released"
+ for attempt in $(seq 1 500); do
+  sh "$ROOT/scripts/home-net-management" install-status > "$TMP/job-status"
+  grep -Eq 'STATUS=(SUCCEEDED|FAILED)' "$TMP/job-status" && break
+  sleep 0.01
+ done
+ if [ "$outcome" = success ]; then grep -Fxq STATUS=SUCCEEDED "$TMP/job-status"; else grep -Fxq STATUS=FAILED "$TMP/job-status"; grep -Fxq EXIT_CODE=23 "$TMP/job-status"; fi
+ job=$(cat "$HOME_NET_MANAGEMENT_CACHE/install-job")
+ grep -q 'fixture: retained worker output' "$job/output.log"
+ [ "$(LC_ALL=C ls -l "$job/output.log" | awk '{print $1}')" = '-rw-------' ]
+done
+before=$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)
+if MOCK_CLASS=CRITICAL sh "$ROOT/scripts/home-net-management" install-latest v1.7.3; then exit 1; fi
+if sh "$ROOT/scripts/home-net-management" install-latest v1.7.2; then exit 1; fi
+[ "$before" = "$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)" ]
+echo 'PASS background launch returns before install finishes; private output and success/failure status retained; target/CRITICAL checks stay synchronous'

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.2}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.3}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -31,7 +31,12 @@ valid_payload_sha() {
 printf '%s\n' "$BUNDLE_REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$|^[0-9a-f]{40}$' \
     || fail "HOME_NET_BUNDLE_REF must be a release tag vX.Y.Z or full commit SHA"
 
-cleanup() { rm -rf "$TMP_DIR"; }
+cleanup() {
+    cleanup_rc=$?
+    rm -rf "$TMP_DIR"
+    if [ -n "${BUNDLE_LOG:-}" ]; then printf 'Bundle exit code: %s\n' "$cleanup_rc"; fi
+    return "$cleanup_rc"
+}
 trap cleanup EXIT HUP INT TERM
 
 [ -f "$HOME_NET_OPENWRT_RELEASE" ] || fail "OpenWrt not detected"
@@ -215,6 +220,17 @@ if [ "${1:-}" = "--scan-payload" ]; then
     exit 0
 fi
 
+# The installed 1.6.0 updater still runs synchronously under rpcd. Its request
+# may expire before Monitoring finishes. Protect this first upgrade as well as
+# future ones by removing the entire bundle's dependency on the RPC pipes.
+if [ "${HOME_NET_MANAGEMENT_CONTEXT:-0}" = 1 ]; then
+    BUNDLE_LOG="$HOME_NET_UPDATER_BACKUP_ROOT/home-net-luci-install-$(date +%Y%m%d-%H%M%S)-$$.log"
+    (umask 077; set -C; : > "$BUNDLE_LOG") || fail 'cannot create private bundle log'
+    chmod 0600 "$BUNDLE_LOG" || fail 'cannot secure bundle log'
+    printf 'Bundle continues independently of LuCI output; diagnostics: %s\n' "$BUNDLE_LOG" || true
+    exec >> "$BUNDLE_LOG" 2>&1
+    printf 'Bundle started: ref=%s pid=%s\n' "$BUNDLE_REF" "$$"
+fi
 fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 . "$BUNDLE_CONF"
 
