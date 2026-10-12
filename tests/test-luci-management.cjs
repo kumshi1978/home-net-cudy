@@ -8,6 +8,10 @@ const rpc={exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-l
  'podkop-status':'STATUS='+podkopWorkerStatus+'\nTARGET=0.7.24\nCURRENT_VERSION='+podkopVersion+'\n',
  'podkop-check':'CURRENT='+podkopVersion+'\nLATEST=0.7.24\n',
  'podkop-log':'ROLLBACK VERIFIED: fixture retained details',
+ 'podkop-update':'Podkop update started in the background. Refresh Updates for the result.\n',
+ 'install-latest':'Installation started in the background. Refresh Updates to check Installed/Active and health.\n',
+ 'save-settings':'Local restrictions saved; Git policy and safety gates remain mandatory.\n',
+ logs:'OK\nInstallation completed\n<img src=x>',
  status:'BUNDLE_INSTALLED='+installed+'\nBUNDLE_ACTIVE='+installed+'\nPODKOP_VERSION='+podkopVersion+'\nUPDATE_STATUS=OK\nRELEASE_ROLLOUT=fleet\nAUTO_APPLY_ALLOWED=1\nAUTO_APPLY_STATE=AUTO APPLY ALLOWED\nROLLOUT_POLICY_STATUS=OK\n'};return {code:0,stdout:output[args[0]] || '',stderr:''}}};
 const ui={showModal:(title,children)=>{modal=E('modal',{},children)},hideModal:()=>{},addNotification:()=>{}};
 const source=fs.readFileSync(path.join(root,'luci/home-net/common.js'),'utf8');
@@ -44,5 +48,47 @@ const data=[{stdout:'BUNDLE_INSTALLED=1.6.0\nBUNDLE_ACTIVE=1.6.0\nSTATUS=OK\nUPD
  const menu=JSON.parse(fs.readFileSync(path.join(root,'luci/menu.d/luci-app-home-net.json')));
  for(const p of ['overview','updates','logs','vpn','settings'])assert(menu['admin/services/home-net/'+p]);
  for(const file of ['status','updates','logs','vpn','settings'])new Function('view','management',fs.readFileSync(path.join(root,'luci/view/home-net/'+file+'.js'),'utf8'))({extend:x=>x},common);
- console.log('PASS LuCI pages, palette, explicit confirmation, CRITICAL disabled, ACL separation and compatibility route');
+ // Exercise the same UI actions in both languages; transport arguments stay English.
+ for(const language of ['ru','ru-RU','en','de','']){
+  const russian=/^ru/.test(language),localPolls=[],confirmations=[],notices=[];
+  const links=[{textContent:'Updates',getAttribute:()=>'/admin/services/home-net/updates'},
+   {textContent:'Logs',getAttribute:()=>'/admin/services/another-app/logs'},
+   {textContent:'Logs',getAttribute:()=>'/admin/services/home-net-other/logs'}];
+  const observers=[];
+  const localized=new Function('baseclass','fs','ui','poll','E','L','window','document','MutationObserver',source)(
+   {extend:x=>x},rpc,{...ui,addNotification:(a,n)=>notices.push(n)},
+   {add:fn=>localPolls.push(fn)},E,{url:x=>'/'+x},
+   {confirm:text=>{confirmations.push(text);return true}},
+   {documentElement:{lang:language},querySelectorAll:()=>links,querySelector:()=>({})},
+   function(callback){this.observe=()=>observers.push(callback)});
+  workerStatus='NONE';podkopWorkerStatus='NONE';podkopVersion='0.7.22';releaseClass='SAFE';
+  const labels=russian?['Обзор','Обновления','Журналы','VPN','Настройки']:['Overview','Updates','Logs','VPN','Settings'];
+  ['Overview','Updates','Logs','VPN','Settings'].forEach((page,i)=>assert(JSON.stringify(localized.render(page,data)).includes('HOME NET — '+labels[i])));
+  assert.equal(links[0].textContent,russian?'Обновления':'Updates');assert.equal(links[1].textContent,'Logs');assert.equal(links[2].textContent,'Logs');
+  if(russian){links.push({textContent:'Logs',getAttribute:()=>'/admin/services/home-net/logs'});observers[0]();assert.equal(links[3].textContent,'Журналы');assert.equal(observers.length,2);}
+  let page=localized.render('Updates',data);
+  await find(page,russian?'Проверить обновление Podkop':'Check Podkop update').attrs.click();
+  await find(page,russian?'Обновить Podkop':'Update Podkop').attrs.click();
+  assert(confirmations[0].includes(russian?'Обновить Podkop до 0.7.24?':'Update Podkop to 0.7.24?'));
+  assert(calls.some(c=>c.args.join(' ')==='podkop-update 0.7.24'));
+  assert(JSON.stringify(page).includes(russian?'Выполняется обновление Podkop':'Podkop update in progress'));
+  assert(JSON.stringify(notices).includes(russian?'Обновление Podkop запущено в фоне.':'Podkop update started in the background.'));
+  assert(find(page,russian?'Обновить Podkop':'Update Podkop').disabled);
+  podkopWorkerStatus='FAILED';await localPolls[localPolls.length-1]();
+  assert(JSON.stringify(page).includes(russian?'Ошибка обновления Podkop':'Podkop update failed'));
+  await find(page,russian?'Показать журнал обновления Podkop':'Show Podkop update log').attrs.click();
+  assert(JSON.stringify(page).includes('ROLLBACK VERIFIED: fixture retained details'));
+  await find(page,russian?'Проверить обновления':'Check for update').attrs.click();
+  find(page,russian?'Установить последний релиз':'Install latest release').attrs.click();
+  await find(modal,russian?'Подтвердить установку':'Confirm installation').attrs.click();
+  assert(JSON.stringify(page).includes(russian?'Выполняется установка':'Installation in progress'));
+  const settings=localized.render('Settings',data);await find(settings,russian?'Сохранить локальные настройки':'Save local settings').attrs.click();
+  const logs=localized.render('Logs',data);await find(logs,russian?'Обновить':'Refresh').attrs.click();
+  const log=all(logs).find(n=>n.tag==='pre');assert.deepEqual(log.children.map(n=>n.children[0]),['<img src=x>','Installation completed','OK']);
+  const selects=all(logs).filter(n=>n.tag==='select');assert.equal(selects[0].value,'all');assert.equal(selects[3].value,'Newest first');
+  const history=localized.render('Overview',[data[0],data[1],{stdout:'Installation completed'}]);
+  assert(all(history).some(n=>n.tag==='pre' && n.children[0]==='Installation completed'));
+  assert.deepEqual(localized.parse('STATUS=OK\nCLASS=SAFE\n'),{STATUS:'OK',CLASS:'SAFE'});
+ }
+ console.log('PASS LuCI pages, Russian/English/fallback, untranslated logs/protocol, confirmation, progress and ACL');
 })().catch(e=>{console.error(e);process.exitCode=1});

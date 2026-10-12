@@ -210,3 +210,15 @@ Cache handling uses fail-safe denial: UCI cache_path (default
 /etc/sing-box directories. Paths containing traversal or config/cache symlink
 components are rejected before package mutation. Custom cache locations outside
 this inventory receive an explicit error; configuration is not rewritten.
+# Язык интерфейса
+
+HOME NET выбирает русский язык, если LuCI использует `ru` или `ru-RU`
+(атрибут `lang` корневого HTML-элемента). При английском, неизвестном
+или отсутствующем языке отображается английский вариант. Дополнительный
+пакет перевода HOME NET не требуется: словарь включён в устанавливаемый
+`common.js`.
+
+Переведены заголовки страниц, кнопки, поля, подтверждения, состояния и ход
+установки HOME NET и Podkop. Имена продуктов, версии, аргументы команд,
+значения фильтров и машинный протокол не меняются. Исходные строки
+журналов и исторические события выводятся без перевода.
