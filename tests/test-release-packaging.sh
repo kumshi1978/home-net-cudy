@@ -74,11 +74,11 @@ if grep -Eq 'HOME_NET_BUNDLE_REF:-main|/main/' "$ROOT/install-all.sh"; then
     echo 'FAIL: moving main in release installer' >&2
     exit 1
 fi
-for ref in unset v1.7.1 "$UPDATER_REF"; do
+for ref in unset v1.7.2 "$UPDATER_REF"; do
     : > "$TMP/urls"
     run_installer "$ref" || { cat "$TMP/output" >&2; exit 1; }
     expected="$ref"
-    [ "$ref" != unset ] || expected=v1.7.1
+    [ "$ref" != unset ] || expected=v1.7.2
     assert_urls "$expected"
     echo "PASS release_ref_$ref"
 done
@@ -97,7 +97,7 @@ for key in MONITORING_BOOTSTRAP_REF HOME_NET_UPDATER_REF; do
     cp "$ROOT/bundle.conf" "$TMP/payloads/bundle.conf"
     sed -i "s/^$key='[^']*'/$key='main'/" "$TMP/payloads/bundle.conf"
     : > "$TMP/urls"
-    if run_installer v1.7.1; then
+    if run_installer v1.7.2; then
         echo "FAIL: accepted moving $key" >&2; exit 1
     fi
     [ "$(wc -l < "$TMP/urls")" -eq 1 ]
@@ -105,7 +105,7 @@ for key in MONITORING_BOOTSTRAP_REF HOME_NET_UPDATER_REF; do
     echo "PASS moving_$key rejected"
 done
 
-grep -Fq "HOME_NET_RELEASE_REF:-v1.7.1" "$ROOT/install.sh"
+grep -Fq "HOME_NET_RELEASE_REF:-v1.7.2" "$ROOT/install.sh"
 grep -Fq "LUCI_VIEW_SRC=\"\$BASE_DIR/../luci/view/home-net/status.js\"" "$ROOT/install/install.sh"
 grep -Fq '/main/rollout-policy.conf' "$ROOT/scripts/home-net-update"
 echo 'PASS Monitoring/LuCI use pinned archive; only rollout policy remains mutable'

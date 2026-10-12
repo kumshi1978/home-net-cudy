@@ -129,7 +129,8 @@ write_installer() {
 [ "$HOME_NET_ACTION_CLASS" = "$MOCK_EXPECT_CLASS" ] || exit 3
 [ "$HOME_NET_STAGE_ONLY" = "$MOCK_EXPECT_STAGE" ] || exit 3
 if [ "${MOCK_INSTALL_FAIL:-0}" = "1" ]; then
-    exit 1
+    echo 'fixture: monitoring step failed' >&2
+    exit 23
 fi
 write_status="${MOCK_HEALTH_STATUS:-OK}"
 cat > "$MOCK_HEALTH_FILE" <<EOF_HEALTH
@@ -359,6 +360,11 @@ case_installer_failure() {
     assert_state INSTALLED_VERSION 1.5.1
     assert_state ACTIVE_VERSION 1.5.1
     assert_state UPDATE_STATUS FAILED
+    assert_output 'bundle installer failed (exit 23)'
+    installer_log=$(sed -n 's/.*diagnostics: \([^;]*\); backup:.*/\1/p' "$TMP/output" | tail -n 1)
+    [ -n "$installer_log" ]
+    grep -q 'fixture: monitoring step failed' "$installer_log"
+    [ "$(LC_ALL=C ls -l "$installer_log" | awk '{print $1}')" = '-rw-------' ]
 }
 
 case_diagnostic_installer_text() {
