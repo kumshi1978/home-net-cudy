@@ -137,6 +137,9 @@ cat "$TMP/legacy-rpc-error"
 grep -q 'WAIT: no new completed health cycle available' "$TMP/root/root/backup-podkop-install/install-verification.log"
 grep -qi 'write error\|broken pipe\|I/O error' "$TMP/legacy-rpc-error"
 echo 'PASS legacy rpcd restart closes LuCI output and aborts on waiting progress echo'
+# The interrupted installer left the mock producer mid-cycle. Complete that
+# independent cycle before attempting the next installation's strict preflight.
+sh "$TMP/bin/sleep"
 : > "$TMP/root/calls"
 cat "$TMP/rpc-output" > "$TMP/fixed-rpc-output" &
 reader=$!
