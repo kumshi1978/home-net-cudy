@@ -205,16 +205,38 @@ MONITORING_INITIALIZED_EPOCH=$(date +%s)
 # Monitoring installation does not control Podkop or sing-box. Podkop's
 # one-shot initialization may legitimately have no persistent procd process.
 verified=0
+waiting_reported=0
+verification_deadline=$((MONITORING_INITIALIZED_EPOCH + 600))
+verification_log="$BACKUP_DIR/install-verification.log"
+: > "$verification_log"
+chmod 0600 "$verification_log"
 for attempt in $(seq 1 60); do
+    now=$(date +%s)
+    [ "$now" -lt "$verification_deadline" ] || break
     current_check=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
     if [ -n "$current_check" ] && [ "$current_check" != "$BEFORE_CHECK" ] &&
-        HOME_NET_VERIFY_AFTER_EPOCH="$MONITORING_INITIALIZED_EPOCH" sh /usr/bin/home-net-install-verify all; then
+        HOME_NET_VERIFY_AFTER_EPOCH="$MONITORING_INITIALIZED_EPOCH" sh /usr/bin/home-net-install-verify all > "$verification_log" 2>&1; then
+        cat "$verification_log"
         verified=1
         break
     fi
-    sleep 10
+    if [ -z "$current_check" ] || [ "$current_check" = "$BEFORE_CHECK" ]; then
+        echo 'WAIT: no new completed health cycle available' > "$verification_log"
+    fi
+    if [ "$waiting_reported" = 0 ]; then
+        echo 'Waiting for a completed healthy cycle after initialization (timeout: 600 seconds)'
+        waiting_reported=1
+    fi
+    remaining=$((verification_deadline - $(date +%s)))
+    [ "$remaining" -gt 0 ] || break
+    [ "$remaining" -le 10 ] || remaining=10
+    [ "$attempt" -lt 60 ] || break
+    sleep "$remaining"
 done
-[ "$verified" = 1 ] || fail 'installed service/lifecycle/health verification timed out; retain backup for recovery'
+if [ "$verified" != 1 ]; then
+    cat "$verification_log" >&2
+    fail "installed service/lifecycle/health verification timed out (600-second deadline / 60 attempts); retain backup: $BACKUP_DIR; diagnostics: $verification_log"
+fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 

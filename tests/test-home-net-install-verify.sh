@@ -24,8 +24,9 @@ echo /etc/sing-box/config.json
 EOF
 cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
-epoch=$(($(date +%s)+2))
+epoch=$(($(date +%s)+${MOCK_WAIT_STEP:-2}))
 printf '%s\n' "$epoch" > "$HOME_NET_TEST_CLOCK_FILE"
+[ "${MOCK_NO_NEW_HEALTH:-0}" = 0 ] || exit 0
 stamp=$(date '+%F %T')
 sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
 mv "$HOME_NET_VERIFY_HEALTH.new" "$HOME_NET_VERIFY_HEALTH"
@@ -88,6 +89,9 @@ grep -q 'fixture: LuCI copy failed' "$TMP/partial-output"
 sh "$REPO/scripts/home-net-install-verify" runtime
 echo 'PASS early LuCI failure leaves every copied runtime helper/init executable'
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
+[ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/output")" = 1 ]
+if grep -q 'FAIL: health cycle predates initialization' "$TMP/output"; then exit 1; fi
+echo 'PASS health retries report waiting once and suppress intermediate FAIL noise'
 sh "$REPO/scripts/home-net-install-verify" all
 [ "$(LC_ALL=C ls -ld "$TMP/root/www/luci-static/resources/view/home-net/status.js" | awk '{print $1}')" = '-rw-r--r--' ]
 [ ! -e "$TMP/root/stat-called" ]
@@ -95,6 +99,14 @@ echo 'PASS actual installer and verifier do not call unavailable stat'
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
+if MOCK_NO_NEW_HEALTH=1 MOCK_WAIT_STEP=300 sh "$TMP/install.ready" > "$TMP/timeout-output" 2>&1; then exit 1; fi
+grep -q 'verification timed out (600-second deadline' "$TMP/timeout-output"
+[ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/timeout-output")" = 1 ]
+grep -q 'FAIL: health cycle predates initialization' "$TMP/timeout-output"
+[ -f "$TMP/root/root/backup-podkop-install/install-verification.log" ]
+# Restore the fixture's independently completed cycle for later checks.
+sh "$TMP/bin/sleep"
+echo 'PASS bounded timeout rejects an old cycle, displays diagnostics and retains backup'
 sh "$REPO/scripts/home-net-install-verify" runtime
 for helper in podkop-service-health-daemon podkop-fakeip-check home-net-status home-net-podkop-update; do
  chmod 0600 "$TMP/root/usr/bin/$helper"
