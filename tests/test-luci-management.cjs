@@ -1,8 +1,8 @@
 const fs=require('fs'),assert=require('assert'),path=require('path');
 const root=path.resolve(__dirname,'..');
-const calls=[],polls=[];let releaseClass='SAFE',modal;
+const calls=[],polls=[];let releaseClass='SAFE',modal,workerStatus='NONE',installed='1.6.0';
 function E(tag,attrs,children){return {tag,attrs:attrs || {},children:Array.isArray(children)?children:[children],disabled:attrs && attrs.disabled,value:attrs && attrs.value || (tag==='select' && children[0].attrs.value),checked:attrs && attrs.checked,replaceChildren(...c){this.children=c},appendChild(c){this.children.push(c)},addEventListener(name,fn){this.attrs[name]=fn}}}
-const rpc={exec:async(bin,args)=>{calls.push({bin,args});return {code:0,stdout:args[0]==='preview'?'TARGET=v1.7.0\nCLASS='+releaseClass+'\n':args[0]==='status'?'RELEASE_ROLLOUT=fleet\nAUTO_APPLY_ALLOWED=1\nAUTO_APPLY_STATE=AUTO APPLY ALLOWED\nROLLOUT_POLICY_STATUS=OK\n':'',stderr:''}}};
+const rpc={exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-latest')workerStatus='RUNNING';return {code:0,stdout:args[0]==='preview'?'TARGET=v1.7.0\nCLASS='+releaseClass+'\n':args[0]==='install-status'?'STATUS='+workerStatus+'\nTARGET=v1.7.0\n':args[0]==='status'?'BUNDLE_INSTALLED='+installed+'\nBUNDLE_ACTIVE='+installed+'\nUPDATE_STATUS=OK\nRELEASE_ROLLOUT=fleet\nAUTO_APPLY_ALLOWED=1\nAUTO_APPLY_STATE=AUTO APPLY ALLOWED\nROLLOUT_POLICY_STATUS=OK\n':'',stderr:''}}};
 const ui={showModal:(title,children)=>{modal=E('modal',{},children)},hideModal:()=>{},addNotification:()=>{}};
 const source=fs.readFileSync(path.join(root,'luci/home-net/common.js'),'utf8');
 const common=new Function('baseclass','fs','ui','poll','E','L','window',source)({extend:x=>x},rpc,ui,{add:fn=>polls.push(fn)},E,{url:x=>'/'+x},{confirm:()=>true});
@@ -21,6 +21,10 @@ const data=[{stdout:'BUNDLE_INSTALLED=1.6.0\nBUNDLE_ACTIVE=1.6.0\nSTATUS=OK\nUPD
  find(updates,'Install latest release').attrs.click();assert(modal);await find(modal,'Confirm installation').attrs.click();
  assert(calls.some(c=>c.bin==='/usr/bin/home-net-management' && c.args.join(' ')==='install-latest v1.7.0'));
  assert(!calls.some(c=>c.bin==='/usr/bin/home-net-update'));
+ assert(JSON.stringify(updates).includes('Installation in progress'));assert(find(updates,'Install latest release').disabled);
+ workerStatus='SUCCEEDED';installed='1.7.0';await polls[polls.length-1]();
+ assert(JSON.stringify(updates).includes('Installation completed'));assert(JSON.stringify(updates).includes('1.7.0'));
+ workerStatus='FAILED';await polls[polls.length-1]();assert(JSON.stringify(updates).includes('Installation failed'));
  releaseClass='CRITICAL';updates=common.render('Updates',data);await find(updates,'Check for update').attrs.click();assert(find(updates,'Install latest release').disabled);
  const acl=JSON.parse(fs.readFileSync(path.join(root,'luci/acl.d/luci-app-home-net.json')));
  assert(!acl['luci-app-home-net'].read.file['/usr/bin/home-net-management']);

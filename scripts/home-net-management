@@ -66,14 +66,63 @@ install_latest() {
     metadata=$(preview) || fail 'release preview failed'
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^TARGET=//p')" = "$target" ] || fail 'latest release changed; confirm again'
     [ "$(printf '%s\n' "$metadata" | sed -n 's/^CLASS=//p')" != CRITICAL ] || fail 'Manual intervention required'
-    # Real updater obtains lock, preflight/health, backup, install and fresh health.
-    HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE="$target" "$UPDATER" apply
+    [ -x "$UPDATER" ] || fail 'updater is not executable'
+    umask 077
+    mkdir -p "$CACHE/jobs"
+    job=$(mktemp -d "$CACHE/jobs/install.XXXXXX")
+    printf '%s\n' "$target" > "$job/target"
+    printf 'QUEUED\n' > "$job/status"
+    cat > "$job/worker.sh" <<'WORKER'
+#!/bin/sh
+set -u
+job=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+printf 'RUNNING\n' > "$job/status.new"
+mv "$job/status.new" "$job/status"
+# The updater remains the sole owner of locking, preflight and version state.
+if HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE="$1" "$2" apply; then rc=0; else rc=$?; fi
+version=${1#v}
+state=${HOME_NET_UPDATE_STATE_FILE:-/etc/home-net-update.state}
+if [ "$rc" = 0 ] && [ -r "$state" ] &&
+    grep -Fxq "INSTALLED_VERSION='$version'" "$state" &&
+    grep -Fxq "ACTIVE_VERSION='$version'" "$state" &&
+    grep -Fxq "UPDATE_STATUS='OK'" "$state"; then result=SUCCEEDED; else result=FAILED; fi
+printf '%s\n' "$rc" > "$job/exit-code"
+printf '%s\n' "$result" > "$job/status.new"
+mv "$job/status.new" "$job/status"
+WORKER
+    chmod 0700 "$job/worker.sh"
+    # POSIX sh provides nohup's signal protection without requiring an optional
+    # BusyBox applet. exec retains the ignored HUP disposition in the worker.
+    (trap '' HUP; exec sh "$job/worker.sh" "$target" "$UPDATER") > "$job/output.log" 2>&1 </dev/null &
+    printf '%s\n' "$!" > "$job/pid"
+    printf '%s\n' "$job" > "$CACHE/install-job.new.$$"
+    mv "$CACHE/install-job.new.$$" "$CACHE/install-job"
+    echo 'Installation started in the background. Refresh Updates to check Installed/Active and health.'
+}
+install_status() {
+    [ -r "$CACHE/install-job" ] || { echo 'STATUS=NONE'; return; }
+    job=$(cat "$CACHE/install-job")
+    case "$job" in "$CACHE"/jobs/install.*) ;; *) fail 'invalid job record' ;; esac
+    [ -d "$job" ] && [ ! -L "$job" ] || fail 'missing job directory'
+    status=$(cat "$job/status")
+    case "$status" in QUEUED|RUNNING)
+        if [ -r "$job/pid" ]; then
+            pid=$(cat "$job/pid")
+            case "$pid" in ''|*[!0-9]*) fail 'invalid worker pid' ;; esac
+            kill -0 "$pid" 2>/dev/null || status=INTERRUPTED
+        fi
+        ;;
+    esac
+    printf 'STATUS=%s\nTARGET=%s\n' "$status" "$(cat "$job/target")"
+    printf 'DIAGNOSTICS=%s/output.log\n' "$job"
+    [ ! -r "$job/exit-code" ] || printf 'EXIT_CODE=%s\n' "$(cat "$job/exit-code")"
 }
 case "${1:-}" in
  settings) settings ;;
  save-settings) shift; save_settings "$@" ;;
  preview) preview ;;
  install-latest) shift; install_latest "$@" ;;
+ install-status) install_status ;;
  podkop-check) /usr/bin/home-net-podkop-update check ;;
  podkop-update) [ "$#" = 2 ] || fail 'confirmed Podkop target required'; /usr/bin/home-net-podkop-update update "$2" ;;
  *) fail 'unknown management action' ;;

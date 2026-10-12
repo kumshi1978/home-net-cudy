@@ -23,6 +23,7 @@ jobs:
           - install-all-safety
           - home-net-luci
           - home-net-install-verify
+          - luci-detached-upgrade
           - home-net-management
           - home-net-podkop-update
           - candidate-packaging

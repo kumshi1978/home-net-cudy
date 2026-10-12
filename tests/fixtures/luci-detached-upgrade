@@ -1,0 +1,91 @@
+# Sourced after the existing isolated Monitoring fixture is prepared.
+mkdir "$TMP/rpc-payloads"
+cp "$TMP/install.fixture" "$TMP/src/install/install.sh"
+cp "$REPO/MONITORING_VERSION" "$TMP/src/MONITORING_VERSION"
+tar -czf "$TMP/rpc-payloads/archive.tar.gz" -C "$TMP" src
+sed "s|/etc/openwrt_release|$TMP/root/etc/openwrt_release|g" "$REPO/install.sh" > "$TMP/rpc-payloads/bootstrap"
+cp "$REPO/install-all.sh" "$TMP/rpc-payloads/bundle-installer"
+cp "$REPO/bundle.conf" "$TMP/rpc-payloads/manifest"
+printf '{"tag_name":"v1.7.3","draft":false,"prerelease":false}\n' > "$TMP/rpc-payloads/release"
+printf '1.7.3\n' > "$TMP/rpc-payloads/version"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/rpc-payloads/updater"
+printf "HOME_NET_UPDATE_MODE='check'\n" > "$TMP/rpc-payloads/config"
+cat > "$TMP/bin/wget" <<'FETCH'
+#!/bin/sh
+out='' url=''
+while [ "$#" -gt 0 ]; do
+ case "$1" in -o|-O) out="$2"; shift 2 ;; -T|--connect-timeout|--max-time|-H) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
+done
+case "$url" in
+ */releases/latest) source=release ;;
+ */VERSION) source=version ;;
+ */bundle.conf) source=manifest ;;
+ */install-all.sh) source=bundle-installer ;;
+ */install.sh) source=bootstrap ;;
+ */archive/*.tar.gz) source=archive.tar.gz ;;
+ */scripts/home-net-update|*/init.d/home-net-update) source=updater ;;
+ */configs/home-net-update.conf.example) source=config ;;
+ *) exit 22 ;;
+esac
+cp "$MOCK_RPC_PAYLOADS/$source" "$out"
+FETCH
+cp "$TMP/bin/wget" "$TMP/bin/curl"
+chmod 0755 "$TMP/bin/wget" "$TMP/bin/curl"
+export MOCK_RPC_PAYLOADS="$TMP/rpc-payloads"
+export HOME_NET_UPDATE_CONF="$TMP/update.conf" HOME_NET_UPDATE_STATE_FILE="$TMP/root/etc/home-net-update.state"
+export HOME_NET_UPDATE_RUNTIME_DIR="$TMP/runtime" HOME_NET_UPDATE_LOCK_DIR="$TMP/lock"
+export HOME_NET_UPDATE_HEALTH_STATE="$HOME_NET_VERIFY_HEALTH" HOME_NET_UPDATE_BACKUP_ROOT="$TMP/backups"
+export HOME_NET_UPDATE_BIN="$TMP/root/usr/bin/updater" HOME_NET_UPDATE_INIT="$TMP/root/etc/init.d/updater"
+export HOME_NET_UPDATE_STATE="$HOME_NET_UPDATE_STATE_FILE" HOME_NET_UPDATE_CONF="$TMP/update.conf"
+export HOME_NET_HEALTH_STATE="$HOME_NET_VERIFY_HEALTH" HOME_NET_UPDATER_BACKUP_ROOT="$TMP/backups"
+export HOME_NET_OPENWRT_RELEASE="$TMP/root/etc/openwrt_release" HOME_NET_FAILOVER_CONF="$TMP/failover"
+export HOME_NET_UPDATE_API_URL=https://fixture.invalid/releases/latest HOME_NET_UPDATE_RAW_URL=https://fixture.invalid
+export HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE=v1.7.3
+printf "INSTALLED_VERSION='1.4.1'\n" > "$TMP/failover"
+printf "HOME_NET_UPDATE_MODE='apply'\nHOME_NET_UPDATE_CANARY='1'\nHOME_NET_UPDATE_COMMAND_TIMEOUT='5'\nHOME_NET_UPDATE_HEALTH_TIMEOUT='2'\nHOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='1'\n" > "$TMP/update.conf"
+mkdir "$TMP/backups"
+for outcome in success failure; do
+ export MOCK_RPC_GATE="$TMP/gate-$outcome"
+ mkdir "$MOCK_RPC_GATE"
+ printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\nUPDATE_STATUS='OK'\n" > "$HOME_NET_UPDATE_STATE_FILE"
+ stamp=$(date -d "@$(($(date +%s)-10))" '+%F %T')
+ printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\nCHECK_STARTED=%s\nLAST_CHECK=%s\n' "$stamp" "$stamp" > "$HOME_NET_VERIFY_HEALTH"
+ if [ "$outcome" = failure ]; then export MOCK_NO_NEW_HEALTH=1 MOCK_WAIT_STEP=300; else export MOCK_NO_NEW_HEALTH=0 MOCK_WAIT_STEP=2; fi
+ mkfifo "$MOCK_RPC_GATE/output"
+ cat "$MOCK_RPC_GATE/output" > "$MOCK_RPC_GATE/request-output" & reader=$!
+ # rpcd expiration kills its immediate management command, not the updater
+ # child. Model that exact process boundary and close the real output reader.
+ (trap '' PIPE; sh "$REPO/tests/fixtures/installed-updater-1.6.0" apply; echo returned) > "$MOCK_RPC_GATE/output" 2>&1 & manager=$!
+ for attempt in $(seq 1 1000); do
+  [ ! -f "$MOCK_RPC_GATE/ready" ] || break
+  "$HOME_NET_TEST_REAL_SLEEP" 0.01
+ done
+ [ -f "$MOCK_RPC_GATE/ready" ] || { cat "$MOCK_RPC_GATE/request-output"; exit 1; }
+ kill -9 "$manager"
+ kill "$reader"
+ wait "$manager" 2>/dev/null || true
+ wait "$reader" 2>/dev/null || true
+ touch "$MOCK_RPC_GATE/closed"
+ for attempt in $(seq 1 1000); do
+  grep -Eq "^UPDATE_STATUS='(OK|FAILED)'$" "$HOME_NET_UPDATE_STATE_FILE" && [ ! -d "$TMP/lock" ] && break
+  "$HOME_NET_TEST_REAL_SLEEP" 0.01
+ done
+ if [ "$outcome" = success ]; then
+  if ! grep -Fxq "INSTALLED_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"; then
+   cat "$HOME_NET_UPDATE_STATE_FILE"
+   cat "$MOCK_RPC_GATE/request-output"
+   for diagnostic in "$TMP/backups"/home-net-luci-install-*.log; do [ ! -f "$diagnostic" ] || cat "$diagnostic"; done
+   exit 1
+  fi
+  grep -Fxq "ACTIVE_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"
+  grep -Fxq "UPDATE_STATUS='OK'" "$HOME_NET_UPDATE_STATE_FILE"
+ else
+  grep -Fxq "INSTALLED_VERSION='1.6.0'" "$HOME_NET_UPDATE_STATE_FILE"
+  grep -Fxq "ACTIVE_VERSION='1.6.0'" "$HOME_NET_UPDATE_STATE_FILE"
+  grep -Fxq "UPDATE_STATUS='FAILED'" "$HOME_NET_UPDATE_STATE_FILE"
+ fi
+ log=$(ls -t "$TMP/backups"/home-net-luci-install-*.log | head -n 1)
+ grep -q 'Bundle exit code:' "$log"
+ [ "$(LC_ALL=C ls -l "$log" | awk '{print $1}')" = '-rw-------' ]
+ echo "PASS installed 1.6.0 updater -> real bundle -> real archive bootstrap -> real Monitoring: RPC expires, $outcome state and private full log retained"
+done
