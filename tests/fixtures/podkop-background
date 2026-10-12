@@ -1,6 +1,8 @@
 # Execute the real package transaction under the new management worker.
 export HOME_NET_MANAGEMENT_CACHE="$TMP/management"
-export HOME_NET_MANAGEMENT_PODKOP_UPDATER="$ROOT/scripts/home-net-podkop-update"
+cp "$ROOT/scripts/home-net-podkop-update" "$TMP/podkop-updater"
+chmod 0755 "$TMP/podkop-updater"
+export HOME_NET_MANAGEMENT_PODKOP_UPDATER="$TMP/podkop-updater"
 export HOME_NET_MANAGEMENT_UPDATER="$TMP/no-home-install"
 printf '#!/bin/sh\ntouch "$MOCK_ROOT/unexpected-home-install"\nexit 99\n' > "$HOME_NET_MANAGEMENT_UPDATER"
 chmod 0755 "$HOME_NET_MANAGEMENT_UPDATER"
@@ -14,7 +16,7 @@ for outcome in success install health rollback-failed; do
  mkfifo "$MOCK_PODKOP_JOB_GATE/rpc-output"
  cat "$MOCK_PODKOP_JOB_GATE/rpc-output" > "$MOCK_PODKOP_JOB_GATE/response" & reader=$!
  sh "$ROOT/scripts/home-net-management" podkop-update 0.7.24 > "$MOCK_PODKOP_JOB_GATE/rpc-output" 2>&1 & requester=$!
- wait "$requester"
+ if ! wait "$requester"; then wait "$reader" || true; cat "$MOCK_PODKOP_JOB_GATE/response"; exit 1; fi
  wait "$reader"
  grep -q 'started in the background' "$MOCK_PODKOP_JOB_GATE/response"
  for attempt in $(seq 1 1000); do
