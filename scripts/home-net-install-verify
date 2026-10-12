@@ -1,0 +1,123 @@
+#!/bin/sh
+# Read-only installed files / lifecycle verification. No service control here.
+set -eu
+ROOT=${HOME_NET_VERIFY_ROOT:-}
+HEALTH=${HOME_NET_VERIFY_HEALTH:-$ROOT/tmp/podkop-service-health/state}
+fail() { echo "FAIL: $*" >&2; exit 1; }
+nft_structure() {
+    nft list table inet PodkopTable >/dev/null 2>&1 || fail 'Podkop nft table missing'
+    for chain in mangle mangle_output proxy; do
+        rules=$(nft -nn list chain inet PodkopTable "$chain" 2>/dev/null) || fail "Podkop nft chain $chain missing"
+        case "$chain" in
+            mangle) hook='type filter hook prerouting priority (mangle|-150);' ;;
+            mangle_output) hook='type route hook output priority (mangle|-150);' ;;
+            proxy) hook='type filter hook prerouting priority (dstnat|-100);' ;;
+        esac
+        printf '%s\n' "$rules" | grep -Eq "$hook" || fail "Podkop nft chain $chain hook/priority invalid"
+        for protocol in tcp udp; do
+            case "$protocol" in tcp) number=6 ;; udp) number=17 ;; esac
+            transport="(meta l4proto|ip protocol) ($protocol|$number)( |$)"
+            if [ "$chain" = proxy ]; then
+                pattern="meta mark & (0x0*100000|1048576) == (0x0*100000|1048576).*$transport.*tproxy ip to 127[.]0[.]0[.]1:1602( |;|$)"
+                printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $protocol TPROXY rule missing"
+            else
+                # Installed Podkop variants can route FakeIP through the
+                # subnet set instead of separate literal-range rules.
+                for destination in '@podkop_subnets'; do
+                    pattern="ip daddr $destination.*$transport.*meta mark set (0x0*100000|1048576)( |;|$)"
+                    [ "$chain" != mangle ] || pattern="iifname @interfaces.*$pattern"
+                    printf '%s\n' "$rules" | grep -Eq "$pattern" || fail "Podkop $chain $protocol marking rule missing"
+                done
+            fi
+        done
+        # Counters describe observed traffic, not configuration validity.
+        if printf '%s\n' "$rules" | grep -Eq 'counter packets 0 bytes 0'; then
+            echo "WARN: Podkop $chain has zero traffic counters; rules exist" >&2
+        fi
+    done
+    interfaces=$(nft -nn list set inet PodkopTable interfaces 2>/dev/null) || fail 'Podkop interface set missing'
+    printf '%s' "$interfaces" | tr '\n' ' ' | grep -Eq 'elements = \{[[:space:]]*"[^" ]+"' || fail 'Podkop interface set empty'
+}
+mode_is() {
+    # BusyBox ls/awk are available on Cudy; stat is not required. Inspect the
+    # object itself, including directory execute bits. Reject symlinks and
+    # special permission bits instead of following a differently protected target.
+    listing=$(LC_ALL=C ls -ld "$1" 2>/dev/null) || return 1
+    mode=$(printf '%s\n' "$listing" | awk 'NR == 1 {print $1}')
+    [ "$mode" = "$2" ]
+}
+runtime() {
+    for name in podkop-service-health-daemon podkop-service-check podkop-fakeip-check podkop-event-monitor podkop-event-runner podkop-country-lookup home-net-log-daemon home-net-log home-net-status home-net-control home-net-management home-net-install-verify home-net-podkop-update; do
+        file="$ROOT/usr/bin/$name"
+        [ -s "$file" ] && [ -x "$file" ] && mode_is "$file" '-rwxr-xr-x' || fail "runtime helper $name missing or not 755"
+    done
+    for name in podkop-service-health home-net-log; do
+        file="$ROOT/etc/init.d/$name"
+        [ -s "$file" ] && [ -x "$file" ] && mode_is "$file" '-rwxr-xr-x' || fail "init script $name missing or not 755"
+    done
+    echo 'PASS: all Monitoring runtime helpers and init scripts 755'
+}
+luci() {
+    for view in status updates logs vpn settings; do
+        file="$ROOT/www/luci-static/resources/view/home-net/$view.js"
+        [ -s "$file" ] || fail "missing LuCI view $view"
+        mode_is "$file" '-rw-r--r--' || fail "LuCI view $view must be 644"
+    done
+    file="$ROOT/www/luci-static/resources/home-net/common.js"
+    [ -s "$file" ] && mode_is "$file" '-rw-r--r--' || fail 'LuCI shared module missing or not 644'
+    for directory in "$ROOT/www/luci-static/resources/view/home-net" "$ROOT/www/luci-static/resources/home-net"; do
+        mode_is "$directory" 'drwxr-xr-x' || fail 'LuCI directory must be 755'
+    done
+    for file in "$ROOT"/www/luci-static/resources/view/home-net/*.js "$ROOT"/www/luci-static/resources/home-net/*.js; do
+        mode_is "$file" '-rw-r--r--' || fail "LuCI file $file must be 644"
+    done
+    echo 'PASS: installed LuCI files 644, directories 755'
+}
+services() {
+    # Podkop 0.7.22 initializes rules/config and exits; its procd status is not
+    # a daemon liveness test. Validate the artifacts and actual proxy instead.
+    generated=$(uci -c "$ROOT/etc/config" -q get podkop.settings.config_path) || fail 'Podkop generated config path unavailable'
+    case "$generated" in /*) ;; *) fail 'Podkop config path must be absolute' ;; esac
+    [ -s "$ROOT$generated" ] || fail 'Podkop generated sing-box config missing'
+    conffile=$(uci -c "$ROOT/etc/config" -q get sing-box.main.conffile) || fail 'sing-box configured path unavailable'
+    [ "$conffile" = "$generated" ] || fail 'sing-box is using a different generated config'
+    nft_structure
+    ip -4 rule list | grep -Eq 'fwmark 0x100000(/0x100000)? lookup (podkop|105)' || fail 'Podkop routing rule missing'
+    ip -4 route list table podkop | grep -Eq '^local (default|0.0.0.0/0) dev lo' || fail 'Podkop local route missing'
+    init="$ROOT/etc/init.d/sing-box"
+    [ -x "$init" ] || fail 'missing sing-box init'
+    "$init" running || fail 'sing-box is not running in procd'
+    "$init" status || fail 'sing-box status disagrees with running'
+    echo 'PASS: Podkop initialized, nft/routing present, sing-box running'
+}
+health() {
+    [ -r "$HEALTH" ] || fail 'health state missing'
+    for pair in STATUS=OK PODKOP=RUNNING SING_BOX=RUNNING FAKEIP=OK SERVICE_CHECK=OK; do
+        grep -Fxq "$pair" "$HEALTH" || fail "health requires $pair"
+    done
+    stamp=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH")
+    [ -n "$stamp" ] || fail 'health timestamp missing'
+    epoch=$(date -d "$stamp" +%s 2>/dev/null) || fail 'invalid health timestamp'
+    age=$(( $(date +%s) - epoch ))
+    [ "$age" -ge 0 ] && [ "$age" -le 600 ] || fail 'health state stale or in the future'
+    started=$(sed -n 's/^CHECK_STARTED=//p' "$HEALTH")
+    started_epoch=$(date -d "$started" +%s 2>/dev/null) || fail 'health cycle start invalid'
+    [ -n "$started" ] && [ "$started_epoch" -le "$epoch" ] || fail 'health cycle incomplete'
+    # During a new cycle Monitoring publishes CHECK_STARTED with the previous
+    # result. Require that the result belongs to this completed cycle.
+    if [ -n "${HOME_NET_VERIFY_AFTER_EPOCH:-}" ]; then
+        boundary="$HOME_NET_VERIFY_AFTER_EPOCH"
+        case "$boundary" in ''|*[!0-9]*) fail 'invalid initialization boundary' ;; esac
+        [ "$started_epoch" -gt "$boundary" ] && [ "$epoch" -gt "$boundary" ] || fail 'health cycle predates initialization'
+    fi
+    echo 'PASS: health OK (lifecycle checked separately)'
+}
+case "${1:-all}" in
+    luci) luci ;;
+    runtime) runtime ;;
+    services) services ;;
+    health) health ;;
+    lifecycle) services; health ;;
+    all) runtime; luci; services; health ;;
+    *) fail 'usage: home-net-install-verify {runtime|luci|services|health|lifecycle|all}' ;;
+esac

@@ -1,0 +1,39 @@
+#!/bin/sh
+# Configuration-only model of Podkop 0.7.22's nft output; no live nft calls.
+set -eu
+[ -f "${MOCK_ROOT:-$HOME_NET_VERIFY_ROOT}/nft" ] || exit 1
+kind=${MOCK_NFT_CASE:-valid}
+case "$*" in
+ *'list table'*) echo 'table inet PodkopTable { }'; exit 0 ;;
+ *'list set'*) echo 'set interfaces { type ifname; elements = { "br-lan" } }'; exit 0 ;;
+esac
+[ "$kind" != empty ] || exit 1
+for argument do chain="$argument"; done
+echo "table inet PodkopTable { chain $chain {"
+if [ "$kind" != nohook ]; then
+ case "$chain" in
+  mangle) echo 'type filter hook prerouting priority -150; policy accept;' ;;
+  mangle_output) echo 'type route hook output priority -150; policy accept;' ;;
+  proxy) echo 'type filter hook prerouting priority -100; policy accept;' ;;
+  *) exit 1 ;;
+ esac
+fi
+if [ "$kind" != norules ]; then
+ for protocol in tcp udp; do
+  if [ "$kind" = numeric ] || [ "$kind" = standby ]; then
+   case "$protocol" in tcp) protocol=6 ;; udp) protocol=17 ;; esac
+  fi
+  if [ "$chain" = proxy ]; then
+   [ "$kind" != notproxy ] || continue
+   echo "meta mark & 0x00100000 == 0x00100000 meta l4proto $protocol tproxy ip to 127.0.0.1:1602 counter packets 0 bytes 0"
+  else
+   [ "$kind" != nomarking ] || continue
+   prefix=''; [ "$chain" != mangle ] || prefix='iifname @interfaces '
+   for destination in 198.18.0.0/15 @podkop_subnets; do
+    [ "$kind:$destination" != standby:198.18.0.0/15 ] || continue
+    echo "${prefix}ip daddr $destination meta l4proto $protocol meta mark set 0x00100000 counter packets 0 bytes 0"
+   done
+  fi
+ done
+fi
+echo '} }'

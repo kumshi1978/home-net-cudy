@@ -1,6 +1,6 @@
 #!/bin/sh
 # HOME NET LuCI status backend
-# Version: 1.6.0
+# Version: 1.7.0
 
 HEALTH_STATE="/tmp/podkop-service-health/state"
 UPDATE_STATE="/etc/home-net-update.state"
@@ -71,12 +71,32 @@ status_cmd() {
     echo "UPDATE_RING=$ring"
     echo "AUTO_UPDATE_CAPABLE=$capable"
     echo "LATEST_RELEASE=$(state_value LATEST_RELEASE "$ROLLOUT_STATE")"
+    echo "RELEASE_ACTION_CLASS=$(state_value RELEASE_ACTION_CLASS "$ROLLOUT_STATE")"
     echo "RELEASE_ROLLOUT=$(state_value RELEASE_ROLLOUT "$ROLLOUT_STATE")"
     echo "AUTO_APPLY_ALLOWED=$(state_value AUTO_APPLY_ALLOWED "$ROLLOUT_STATE")"
     echo "AUTO_APPLY_STATE=$(state_value AUTO_APPLY_STATE "$ROLLOUT_STATE")"
     echo "ROLLOUT_POLICY_STATUS=$(state_value POLICY_STATUS "$ROLLOUT_STATE")"
     echo "FAILOVER_VERSION=$(state_value INSTALLED_VERSION "$FAILOVER_CONF")"
-    echo "MONITORING_VERSION=1.6.0"
+    echo "MONITORING_VERSION=1.7.0"
+    echo "SYSTEM=$(uptime 2>/dev/null || echo unknown)"
+    echo "HOSTNAME=$(hostname)"
+    vpn=$(health_value ACTIVE_VPN)
+    case "$vpn" in awg_main|awg_backup)
+        vpn_age=$(awg_handshake_age "$vpn")
+        case "$vpn_age" in ''|*[!0-9]*) vpn_status=UNKNOWN ;; *)
+            if [ "$vpn_age" -le 180 ]; then
+                [ "$vpn" != awg_backup ] && vpn_status=Connected || vpn_status='Failover active'
+            else vpn_status=UNAVAILABLE; fi ;;
+        esac ;;
+        *) vpn_status=UNKNOWN ;;
+    esac
+    echo "VPN_STATUS=$vpn_status"
+    [ "$vpn" != awg_backup ] && echo 'BACKUP_TUNNEL_STATUS=Standby' || echo 'BACKUP_TUNNEL_STATUS=Failover active'
+    echo "LAST_ERROR=$(health_value REASON)"
+    echo "PODKOP_VERSION=$(podkop show_version 2>/dev/null || echo unknown)"
+    if [ -f /tmp/sing-box/cache.db ]; then echo "FAKEIP_CACHE_SIZE=$(wc -c < /tmp/sing-box/cache.db) bytes"; else echo 'FAKEIP_CACHE_SIZE=unknown'; fi
+    echo "FAKEIP_LAST_ERROR=$(health_value FAKEIP_ERROR)"
+    echo "FAKEIP_ERROR_TYPE=$(health_value FAKEIP_ERROR_TYPE)"
     echo "PROBLEM_COUNT=$(wc -l < "$PROBLEM_LOG" 2>/dev/null || echo 0)"
 }
 
@@ -99,8 +119,33 @@ healthlog_cmd() {
     [ -n "$latest" ] && tail -n "$lines" "$latest"
 }
 
+
+settings_cmd() {
+    configured=$(update_local_value HOME_NET_AUTO_UPDATE_ENABLED)
+    [ -z "$configured" ] && echo 'LOCAL_POLICY_CONFIGURED=0' || echo 'LOCAL_POLICY_CONFIGURED=1'
+    for key in HOME_NET_AUTO_UPDATE_ENABLED HOME_NET_UPDATE_MODE HOME_NET_UPDATE_TIME HOME_NET_UPDATE_WINDOW_START HOME_NET_UPDATE_WINDOW_END HOME_NET_UPDATE_JITTER; do
+        printf '%s=%s\n' "$key" "$(update_local_value "$key")"
+    done
+}
+logs_cmd() {
+    component="${1:-all}" severity="${2:-all}" lines="${3:-100}"
+    case "$component" in all|updater|monitoring|failover|podkop|sing-box|system) ;; *) exit 2 ;; esac
+    case "$severity" in all|info|warning|error) ;; *) exit 2 ;; esac
+    case "$lines" in 50|100|250|500) ;; *) exit 2 ;; esac
+    # Bounded newest input; filter before limiting displayed rows.
+    logread 2>/dev/null | tail -n 3000 | awk -v c="$component" -v s="$severity" '
+        { l=tolower($0); match_component=(c=="all" || (c=="system" && l !~ /home-net|podkop|sing-box/) ||
+          (c=="updater" && l ~ /home-net-update/) || (c=="monitoring" && l ~ /podkop-service-health|home-net-log/) ||
+          (c=="failover" && l ~ /podkop-awg/) || (c=="podkop" && l ~ /podkop/) || (c=="sing-box" && l ~ /sing-box/));
+          level=(l ~ /err(or)?|fail/ ? "error" : (l ~ /warn/ ? "warning" : "info"));
+          if (match_component && (s=="all" || s==level)) print }' | tail -n "$lines" |
+        sed -E 's/(password|token|private_key|preshared_key|secret)[=:][^[:space:]]+/\1=[redacted]/g'
+}
+
 case "${1:-status}" in
     status) status_cmd ;;
+    settings) settings_cmd ;;
+    logs) shift; logs_cmd "${1:-all}" "${2:-all}" "${3:-100}" ;;
     problems) shift; problems_cmd "${1:-100}" ;;
     events) shift; events_cmd "${1:-100}" ;;
     healthlog) shift; healthlog_cmd "${1:-100}" ;;

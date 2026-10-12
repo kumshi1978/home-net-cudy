@@ -12,8 +12,8 @@ grep -Fq '/usr/bin/home-net-control' "$ROOT/luci/acl.d/luci-app-home-net.json"
 grep -Fq '"admin/services/home-net"' "$ROOT/luci/menu.d/luci-app-home-net.json"
 grep -Fq "switch-main" "$ROOT/scripts/home-net-control"
 grep -Fq "switch-backup" "$ROOT/scripts/home-net-control"
-grep -Fq "Update ring" "$ROOT/luci/view/home-net/status.js"
-grep -Fq "Release rollout" "$ROOT/luci/view/home-net/status.js"
+grep -Fq "Roll out ring" "$ROOT/luci/home-net/common.js"
+grep -Fq "Release rollout" "$ROOT/luci/home-net/common.js"
 grep -Fq "AUTO_APPLY_STATE" "$ROOT/scripts/home-net-status"
 
 if grep -Eq '(^|[[:space:]])(reboot|shutdown)([[:space:]]|$)|/etc/init\.d/network[[:space:]]+(restart|reload)' "$ROOT/scripts/home-net-control"; then
@@ -22,3 +22,5 @@ if grep -Eq '(^|[[:space:]])(reboot|shutdown)([[:space:]]|$)|/etc/init\.d/networ
 fi
 
 echo "HOME NET LuCI static tests: PASS"
+
+node "$ROOT/tests/test-luci-management.cjs"
