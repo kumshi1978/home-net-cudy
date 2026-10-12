@@ -1,6 +1,6 @@
 #!/bin/sh
 # HOME NET LuCI status backend
-# Version: 1.7.0
+# Version: 1.7.1
 
 HEALTH_STATE="/tmp/podkop-service-health/state"
 UPDATE_STATE="/etc/home-net-update.state"
@@ -77,7 +77,7 @@ status_cmd() {
     echo "AUTO_APPLY_STATE=$(state_value AUTO_APPLY_STATE "$ROLLOUT_STATE")"
     echo "ROLLOUT_POLICY_STATUS=$(state_value POLICY_STATUS "$ROLLOUT_STATE")"
     echo "FAILOVER_VERSION=$(state_value INSTALLED_VERSION "$FAILOVER_CONF")"
-    echo "MONITORING_VERSION=1.7.0"
+    echo "MONITORING_VERSION=1.7.1"
     echo "SYSTEM=$(uptime 2>/dev/null || echo unknown)"
     echo "HOSTNAME=$(hostname)"
     vpn=$(health_value ACTIVE_VPN)

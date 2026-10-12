@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.7.0
+# Version: 1.7.1
 
 set -e
 
@@ -188,10 +188,15 @@ fi
 
 /etc/init.d/podkop-service-health enable
 if /etc/init.d/podkop-service-health running; then
-    /etc/init.d/podkop-service-health restart
-else
-    /etc/init.d/podkop-service-health start
+    /etc/init.d/podkop-service-health stop
 fi
+# Stop the old producer before recording the boundary, then launch the new one.
+# Keep strict freshness with second-resolution timestamps: its first cycle must
+# start in a later second, even when procd starts it immediately.
+BEFORE_CHECK=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
+MONITORING_INITIALIZED_EPOCH=$(date +%s)
+sleep 1
+/etc/init.d/podkop-service-health start
 
 /etc/init.d/home-net-log enable
 if /etc/init.d/home-net-log running; then
@@ -201,7 +206,6 @@ else
 fi
 
 /etc/init.d/rpcd restart
-MONITORING_INITIALIZED_EPOCH=$(date +%s)
 # Monitoring installation does not control Podkop or sing-box. Podkop's
 # one-shot initialization may legitimately have no persistent procd process.
 verified=0
@@ -240,6 +244,6 @@ fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
-echo "HOME NET Podkop Monitor v1.7.0 installed"
+echo "HOME NET Podkop Monitor v1.7.1 installed"
 echo "LuCI page: Services -> HOME NET"
 echo "Domain capture remains disabled until explicitly enabled."

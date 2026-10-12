@@ -26,6 +26,7 @@ cat > "$TMP/bin/sleep" <<'EOF'
 #!/bin/sh
 epoch=$(($(date +%s)+${MOCK_WAIT_STEP:-2}))
 printf '%s\n' "$epoch" > "$HOME_NET_TEST_CLOCK_FILE"
+[ -f "$HOME_NET_VERIFY_ROOT/podkop-service-health.running" ] || exit 0
 [ "${MOCK_NO_NEW_HEALTH:-0}" = 0 ] || exit 0
 stamp=$(date '+%F %T')
 sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
@@ -52,13 +53,21 @@ name=${0##*/}
 echo "$name $1" >> "$HOME_NET_VERIFY_ROOT/calls"
 case "$1" in
  running|status) [ -f "$HOME_NET_VERIFY_ROOT/$name.running" ] ;;
+ stop) rm -f "$HOME_NET_VERIFY_ROOT/$name.running" ;;
  start|restart)
   touch "$HOME_NET_VERIFY_ROOT/$name.running"
   if [ "$name" = podkop-service-health ]; then
-   stamp=$(date -d "@$(($(date +%s)-2))" '+%F %T')
-   sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
+   stamp=$(date '+%F %T')
+   if [ "${MOCK_FIRST_CYCLE_COMPLETE:-0}" = 1 ]; then
+    sed -e "s/LAST_CHECK=.*/LAST_CHECK=$stamp/" -e "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
+   else
+    sed "s/CHECK_STARTED=.*/CHECK_STARTED=$stamp/" "$HOME_NET_VERIFY_HEALTH" > "$HOME_NET_VERIFY_HEALTH.new"
+   fi
    mv "$HOME_NET_VERIFY_HEALTH.new" "$HOME_NET_VERIFY_HEALTH"
    [ "${DROP_PODKOP:-0}" != 1 ] || rm -f "$HOME_NET_VERIFY_ROOT/podkop.running"
+  fi
+  if [ "$name" = rpcd ] && [ "${MOCK_RPCD_DELAY:-0}" != 0 ]; then
+   printf '%s\n' "$(($(date +%s)+MOCK_RPCD_DELAY))" > "$HOME_NET_TEST_CLOCK_FILE"
   fi ;;
  enable) exit 0 ;;
  *) exit 1 ;;
@@ -99,10 +108,19 @@ echo 'PASS actual installer and verifier do not call unavailable stat'
 if grep -Eq '^(podkop|sing-box) (start|stop|restart)$' "$TMP/root/calls"; then exit 1; fi
 [ ! -e "$TMP/root/podkop.running" ]
 echo 'PASS actual installer under umask 077; one-shot Podkop accepted without service control'
+# Upgrade from 1.6.0: the first new cycle completes before a slow rpcd restart.
+# No later cycle is available; capturing the boundary after rpcd must fail.
+printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/home-net-update.state"
+cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
+MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
+grep -q 'HOME NET Podkop Monitor v1.7.1 installed' "$TMP/race-output"
+if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
+cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
+echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'
 if MOCK_NO_NEW_HEALTH=1 MOCK_WAIT_STEP=300 sh "$TMP/install.ready" > "$TMP/timeout-output" 2>&1; then exit 1; fi
 grep -q 'verification timed out (600-second deadline' "$TMP/timeout-output"
 [ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/timeout-output")" = 1 ]
-grep -q 'FAIL: health cycle predates initialization' "$TMP/timeout-output"
+grep -q 'WAIT: no new completed health cycle available' "$TMP/timeout-output"
 [ -f "$TMP/root/root/backup-podkop-install/install-verification.log" ]
 # Restore the fixture's independently completed cycle for later checks.
 sh "$TMP/bin/sleep"
