@@ -698,18 +698,26 @@ apply_fetched_release() {
         "installing $release_tag ($UPDATE_ACTION_CLASS)" "$release_version" "$LAST_HEALTH_RESULT" none
 
     log "installing stable HOME NET bundle $release_tag class=$UPDATE_ACTION_CLASS"
-    if ! HOME_NET_BUNDLE_REF="$release_tag" \
+    installer_log="$backup/bundle-install.log"
+    : > "$installer_log" || die "cannot create bundle installer log"
+    chmod 0600 "$installer_log" || die "cannot secure bundle installer log"
+    if HOME_NET_BUNDLE_REF="$release_tag" \
          HOME_NET_UPDATE_IN_PROGRESS=1 \
          HOME_NET_SKIP_VERSION_RECORD=1 \
          HOME_NET_ACTION_CLASS="$UPDATE_ACTION_CLASS" \
          HOME_NET_STAGE_ONLY="$stage_only" \
-         sh "$installer"
+         sh "$installer" > "$installer_log" 2>&1
     then
+        installer_rc=0
+    else
+        installer_rc=$?
+    fi
+    if [ "$installer_rc" != 0 ]; then
         resume_controlled_recovery
         evaluate_health || true
         write_update_state "$current" "$active" FAILED none \
             "bundle installer failed" "$release_version" "$LAST_HEALTH_RESULT" none
-        die "bundle installer failed; installed version was not changed; backup: $backup"
+        die "bundle installer failed (exit $installer_rc); installed version was not changed; diagnostics: $installer_log; backup: $backup"
     fi
 
     resume_controlled_recovery

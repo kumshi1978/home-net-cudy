@@ -8,6 +8,7 @@ export HOME_NET_VERIFY_HEALTH="$TMP/root/tmp/podkop-service-health/state"
 mkdir -p "$TMP/root/etc/init.d" "$TMP/root/usr/bin" "$TMP/root/tmp/podkop-service-health" "$TMP/root/www/luci-static/resources/view/home-net" "$TMP/root/www/luci-static/resources/home-net"
 mkdir -p "$TMP/bin" "$TMP/root/etc/sing-box" "$TMP/root/etc/config"
 export HOME_NET_TEST_REAL_DATE="$(command -v date)" HOME_NET_TEST_CLOCK_FILE="$TMP/clock"
+export HOME_NET_TEST_REAL_SLEEP="$(command -v sleep)"
 "$HOME_NET_TEST_REAL_DATE" +%s > "$TMP/clock"
 cp "$REPO/tests/fixtures/podkop-date" "$TMP/bin/date"
 cp "$REPO/tests/fixtures/podkop-nft" "$TMP/bin/nft"
@@ -68,6 +69,10 @@ case "$1" in
   fi
   if [ "$name" = rpcd ] && [ "${MOCK_RPCD_DELAY:-0}" != 0 ]; then
    printf '%s\n' "$(($(date +%s)+MOCK_RPCD_DELAY))" > "$HOME_NET_TEST_CLOCK_FILE"
+  fi
+  if [ "$name" = rpcd ] && [ -n "${MOCK_RPCD_READER_PID:-}" ]; then
+   kill "$MOCK_RPCD_READER_PID"
+   "$HOME_NET_TEST_REAL_SLEEP" 0.1
   fi ;;
  enable) exit 0 ;;
  *) exit 1 ;;
@@ -113,10 +118,35 @@ echo 'PASS actual installer under umask 077; one-shot Podkop accepted without se
 printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/home-net-update.state"
 cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
 MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
-grep -q 'HOME NET Podkop Monitor v1.7.1 installed' "$TMP/race-output"
+grep -q 'HOME NET Podkop Monitor v1.7.2 installed' "$TMP/race-output"
 if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
 cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'
+# Reproduce rpcd's disappearing output reader with a real FIFO. rpcd ignores
+# SIGPIPE; shell builtins then report EPIPE and set -e aborts on progress echo.
+# The legacy installer restarted rpcd regardless of the in-progress flag.
+sed 's/if \[ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" != 1 \]; then/if true; then/' "$TMP/install.ready" > "$TMP/install.legacy"
+mkfifo "$TMP/rpc-output"
+cat "$TMP/rpc-output" > "$TMP/legacy-rpc-output" &
+reader=$!
+legacy_rc=0
+(trap '' PIPE; HOME_NET_UPDATE_IN_PROGRESS=1 MOCK_RPCD_READER_PID="$reader" sh "$TMP/install.legacy" > "$TMP/rpc-output" 2> "$TMP/legacy-rpc-error") || legacy_rc=$?
+wait "$reader" 2>/dev/null || true
+[ "$legacy_rc" != 0 ]
+grep -q 'WAIT: no new completed health cycle available' "$TMP/root/root/backup-podkop-install/install-verification.log"
+grep -qi 'write error\|broken pipe' "$TMP/legacy-rpc-error"
+echo 'PASS legacy rpcd restart closes LuCI output and aborts on waiting progress echo'
+: > "$TMP/root/calls"
+cat "$TMP/rpc-output" > "$TMP/fixed-rpc-output" &
+reader=$!
+fixed_rc=0
+(trap '' PIPE; HOME_NET_UPDATE_IN_PROGRESS=1 MOCK_RPCD_READER_PID="$reader" sh "$TMP/install.ready" > "$TMP/rpc-output" 2> "$TMP/fixed-rpc-error") || fixed_rc=$?
+wait "$reader" || true
+[ "$fixed_rc" = 0 ]
+if grep -Eq '^rpcd (restart|reload)$' "$TMP/root/calls"; then exit 1; fi
+grep -q 'PASS: ' "$TMP/root/root/backup-podkop-install/install-verification.log"
+cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
+echo 'PASS LuCI update keeps rpcd reader alive, completes fresh verification and preserves version ownership'
 if MOCK_NO_NEW_HEALTH=1 MOCK_WAIT_STEP=300 sh "$TMP/install.ready" > "$TMP/timeout-output" 2>&1; then exit 1; fi
 grep -q 'verification timed out (600-second deadline' "$TMP/timeout-output"
 [ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/timeout-output")" = 1 ]

@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.7.1
+# Version: 1.7.2
 
 set -e
 
@@ -205,7 +205,13 @@ else
     /etc/init.d/home-net-log start
 fi
 
-/etc/init.d/rpcd restart
+# LuCI executes the bundle through rpcd and inherits its output pipes. Restarting
+# rpcd here closes their readers: the next progress echo fails with EPIPE (or
+# SIGPIPE), aborting this set -e installer before the first health cycle.
+# Reload also replaces rpcd, so neither operation is safe inside an update.
+if [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" != 1 ]; then
+    /etc/init.d/rpcd restart
+fi
 # Monitoring installation does not control Podkop or sing-box. Podkop's
 # one-shot initialization may legitimately have no persistent procd process.
 verified=0
@@ -244,6 +250,6 @@ fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
-echo "HOME NET Podkop Monitor v1.7.1 installed"
+echo "HOME NET Podkop Monitor v1.7.2 installed"
 echo "LuCI page: Services -> HOME NET"
 echo "Domain capture remains disabled until explicitly enabled."

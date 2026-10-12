@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.1}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.2}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
