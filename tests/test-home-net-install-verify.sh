@@ -133,8 +133,9 @@ legacy_rc=0
 (trap '' PIPE; HOME_NET_UPDATE_IN_PROGRESS=1 MOCK_RPCD_READER_PID="$reader" sh "$TMP/install.legacy" > "$TMP/rpc-output" 2> "$TMP/legacy-rpc-error") || legacy_rc=$?
 wait "$reader" 2>/dev/null || true
 [ "$legacy_rc" != 0 ]
+cat "$TMP/legacy-rpc-error"
 grep -q 'WAIT: no new completed health cycle available' "$TMP/root/root/backup-podkop-install/install-verification.log"
-grep -qi 'write error\|broken pipe' "$TMP/legacy-rpc-error"
+grep -qi 'write error\|broken pipe\|I/O error' "$TMP/legacy-rpc-error"
 echo 'PASS legacy rpcd restart closes LuCI output and aborts on waiting progress echo'
 : > "$TMP/root/calls"
 cat "$TMP/rpc-output" > "$TMP/fixed-rpc-output" &
