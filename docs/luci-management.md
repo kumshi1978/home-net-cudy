@@ -174,6 +174,18 @@ Offline fixtures cover one-shot Podkop, missing proxy/config/rules, FakeIP failu
 real downgrade semantics, partial update/full file restoration and unhealthy rollback.
 Hardware lifecycle and rollback still require a backup-only canary test.
 
+User-reported cudy-backup canary retest 4 passed at aa6585c: Monitoring 1.7.0,
+runtime/LuCI permissions, Podkop lifecycle, sing-box, FakeIP and health. Installed
+and Active remained 1.6.0 with HOME_NET_SKIP_VERSION_RECORD=1. This receipt applies
+to that candidate; subsequent installer log changes are offline-tested separately.
+
+Monitoring's final health wait has a 600-second epoch deadline and a 60-attempt
+cap, with sleeps up to 10 seconds. It reports waiting once instead of printing
+each intermediate verifier failure. The last attempt's output is retained in
+/root/backup-podkop-install/install-verification.log (0600). Success prints its
+verified result once; timeout prints the last diagnostic, fails installation and
+retains the backup. Initialization freshness and all safety gates remain mandatory.
+
 Round 2 validation requires mangle/prerouting (-150), mangle_output/output
 (-150) and proxy/prerouting (-100), TCP/UDP subnet-set marking, TCP/UDP
 TPROXY to 127.0.0.1:1602, and a nonempty interfaces set. Empty tables, missing
