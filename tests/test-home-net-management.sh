@@ -52,7 +52,7 @@ cat > "$TMP/bin/curl" <<'EOF'
 for argument do output="$argument"; done
 case "$*" in
  *releases/latest*) printf '{"tag_name":"v1.7.3","draft":false,"prerelease":false}\n' > "$output" ;;
- */bundle.conf) printf "HOME_NET_BUNDLE_VERSION='1.7.3'\nUPDATE_ACTION_CLASS='%s'\n" "${MOCK_CLASS:-SAFE}" > "$output" ;;
+ */bundle.conf*) printf "HOME_NET_BUNDLE_VERSION='1.7.3'\nUPDATE_ACTION_CLASS='%s'\n" "${MOCK_CLASS:-SAFE}" > "$output" ;;
  *) exit 1 ;;
 esac
 EOF
