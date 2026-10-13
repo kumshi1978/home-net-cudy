@@ -6,8 +6,8 @@ tar -czf "$TMP/rpc-payloads/archive.tar.gz" -C "$TMP" src
 sed "s|/etc/openwrt_release|$TMP/root/etc/openwrt_release|g" "$REPO/install.sh" > "$TMP/rpc-payloads/bootstrap"
 cp "$REPO/install-all.sh" "$TMP/rpc-payloads/bundle-installer"
 cp "$REPO/bundle.conf" "$TMP/rpc-payloads/manifest"
-printf '{"tag_name":"v1.7.3","draft":false,"prerelease":false}\n' > "$TMP/rpc-payloads/release"
-printf '1.7.3\n' > "$TMP/rpc-payloads/version"
+printf '{"tag_name":"v1.7.4","draft":false,"prerelease":false}\n' > "$TMP/rpc-payloads/release"
+printf '1.7.4\n' > "$TMP/rpc-payloads/version"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/rpc-payloads/updater"
 printf "HOME_NET_UPDATE_MODE='check'\n" > "$TMP/rpc-payloads/config"
 cat > "$TMP/bin/wget" <<'FETCH'
@@ -40,7 +40,7 @@ export HOME_NET_UPDATE_STATE="$HOME_NET_UPDATE_STATE_FILE" HOME_NET_UPDATE_CONF=
 export HOME_NET_HEALTH_STATE="$HOME_NET_VERIFY_HEALTH" HOME_NET_UPDATER_BACKUP_ROOT="$TMP/backups"
 export HOME_NET_OPENWRT_RELEASE="$TMP/root/etc/openwrt_release" HOME_NET_FAILOVER_CONF="$TMP/failover"
 export HOME_NET_UPDATE_API_URL=https://fixture.invalid/releases/latest HOME_NET_UPDATE_RAW_URL=https://fixture.invalid
-export HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE=v1.7.3
+export HOME_NET_MANAGEMENT_CONTEXT=1 HOME_NET_CONFIRMED_RELEASE=v1.7.4
 printf "INSTALLED_VERSION='1.4.1'\n" > "$TMP/failover"
 printf "HOME_NET_UPDATE_MODE='apply'\nHOME_NET_UPDATE_CANARY='1'\nHOME_NET_UPDATE_COMMAND_TIMEOUT='5'\nHOME_NET_UPDATE_HEALTH_TIMEOUT='2'\nHOME_NET_UPDATE_HEALTH_RETRY_INTERVAL='1'\n" > "$TMP/update.conf"
 mkdir "$TMP/backups"
@@ -71,13 +71,13 @@ for outcome in success failure; do
   "$HOME_NET_TEST_REAL_SLEEP" 0.01
  done
  if [ "$outcome" = success ]; then
-  if ! grep -Fxq "INSTALLED_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"; then
+  if ! grep -Fxq "INSTALLED_VERSION='1.7.4'" "$HOME_NET_UPDATE_STATE_FILE"; then
    cat "$HOME_NET_UPDATE_STATE_FILE"
    cat "$MOCK_RPC_GATE/request-output"
    for diagnostic in "$TMP/backups"/home-net-luci-install-*.log; do [ ! -f "$diagnostic" ] || cat "$diagnostic"; done
    exit 1
   fi
-  grep -Fxq "ACTIVE_VERSION='1.7.3'" "$HOME_NET_UPDATE_STATE_FILE"
+  grep -Fxq "ACTIVE_VERSION='1.7.4'" "$HOME_NET_UPDATE_STATE_FILE"
   grep -Fxq "UPDATE_STATUS='OK'" "$HOME_NET_UPDATE_STATE_FILE"
  else
   grep -Fxq "INSTALLED_VERSION='1.6.0'" "$HOME_NET_UPDATE_STATE_FILE"

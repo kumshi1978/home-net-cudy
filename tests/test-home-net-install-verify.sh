@@ -130,7 +130,7 @@ echo 'PASS actual installer under umask 077; one-shot Podkop accepted without se
 printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/home-net-update.state"
 cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
 MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
-grep -q 'HOME NET Podkop Monitor v1.7.3 installed' "$TMP/race-output"
+grep -q 'HOME NET Podkop Monitor v1.7.4 installed' "$TMP/race-output"
 if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
 cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'

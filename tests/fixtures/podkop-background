@@ -1,0 +1,73 @@
+# Execute the real package transaction under the new management worker.
+export HOME_NET_MANAGEMENT_CACHE="$TMP/management"
+cp "$ROOT/scripts/home-net-podkop-update" "$TMP/podkop-updater"
+chmod 0755 "$TMP/podkop-updater"
+export HOME_NET_MANAGEMENT_PODKOP_UPDATER="$TMP/podkop-updater"
+export HOME_NET_MANAGEMENT_UPDATER="$TMP/no-home-install"
+printf '#!/bin/sh\ntouch "$MOCK_ROOT/unexpected-home-install"\nexit 99\n' > "$HOME_NET_MANAGEMENT_UPDATER"
+chmod 0755 "$HOME_NET_MANAGEMENT_UPDATER"
+sh "$ROOT/scripts/home-net-management" podkop-status | grep -Fxq STATUS=NONE
+for outcome in success install health rollback-failed; do
+ reset
+ unset MOCK_FAIL MOCK_HEALTH MOCK_ROLLBACK_HEALTH
+ case "$outcome" in install) export MOCK_FAIL=1 ;; health) export MOCK_HEALTH=FAIL ;; rollback-failed) export MOCK_FAIL=1 MOCK_ROLLBACK_HEALTH=FAIL ;; esac
+ export MOCK_PODKOP_JOB_GATE="$TMP/gate-$outcome"
+ mkdir "$MOCK_PODKOP_JOB_GATE"
+ mkfifo "$MOCK_PODKOP_JOB_GATE/rpc-output"
+ cat "$MOCK_PODKOP_JOB_GATE/rpc-output" > "$MOCK_PODKOP_JOB_GATE/response" & reader=$!
+ sh "$ROOT/scripts/home-net-management" podkop-update 0.7.24 > "$MOCK_PODKOP_JOB_GATE/rpc-output" 2>&1 & requester=$!
+ if ! wait "$requester"; then wait "$reader" || true; cat "$MOCK_PODKOP_JOB_GATE/response"; exit 1; fi
+ wait "$reader"
+ grep -q 'started in the background' "$MOCK_PODKOP_JOB_GATE/response"
+ for attempt in $(seq 1 1000); do
+  [ ! -f "$MOCK_PODKOP_JOB_GATE/ready" ] || break
+  "$HOME_NET_TEST_REAL_SLEEP" 0.01
+ done
+ [ -f "$MOCK_PODKOP_JOB_GATE/ready" ]
+ [ "$(cat "$TMP/current")" = 0.7.22 ]
+ job=$(cat "$HOME_NET_MANAGEMENT_CACHE/podkop-job")
+ kill -HUP "$(cat "$job/pid")"
+ sh "$ROOT/scripts/home-net-management" podkop-status | grep -Fxq STATUS=RUNNING
+ count=$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)
+ if sh "$ROOT/scripts/home-net-management" podkop-update 0.7.24 > "$TMP/parallel" 2>&1; then exit 1; fi
+ grep -q 'another update is in progress' "$TMP/parallel"
+ if sh "$ROOT/scripts/home-net-management" install-latest v1.7.4 > "$TMP/parallel" 2>&1; then exit 1; fi
+ grep -q 'another update is in progress' "$TMP/parallel"
+ [ ! -e "$TMP/unexpected-home-install" ]
+ [ "$count" = "$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)" ]
+ touch "$MOCK_PODKOP_JOB_GATE/released"
+ for attempt in $(seq 1 1000); do
+  sh "$ROOT/scripts/home-net-management" podkop-status > "$TMP/job-status"
+  grep -Eq '^STATUS=(SUCCEEDED|FAILED)$' "$TMP/job-status" && break
+  "$HOME_NET_TEST_REAL_SLEEP" 0.01
+ done
+ if [ "$outcome" = success ]; then
+  grep -Fxq STATUS=SUCCEEDED "$TMP/job-status"
+  grep -Fxq CURRENT_VERSION=0.7.24 "$TMP/job-status"
+ else
+  grep -Fxq STATUS=FAILED "$TMP/job-status"
+  grep -Fxq CURRENT_VERSION=0.7.22 "$TMP/job-status"
+  if [ "$outcome" = rollback-failed ]; then
+   grep -q 'ROLLBACK FAILED' "$job/output.log"
+   ! grep -q 'ROLLBACK VERIFIED' "$job/output.log"
+  else
+   grep -q 'ROLLBACK VERIFIED' "$job/output.log"
+   [ "$(cat "$TMP/router/etc/sing-box/config.json")" = config ]
+   [ "$(cat "$TMP/router/tmp/sing-box/cache.db")" = cache ]
+   [ "$(cat "$TMP/router/tmp/podkop/state")" = runtime ]
+  fi
+ fi
+ [ "$(cat "$TMP/router/etc/config/network")" = protected ]
+ [ ! -d "$TMP/lock" ]
+ [ "$(LC_ALL=C ls -l "$job/output.log" | awk '{print $1}')" = '-rw-------' ]
+ sh "$ROOT/scripts/home-net-management" podkop-log > "$TMP/log-readback"
+ cmp "$TMP/log-readback" "$job/output.log"
+ echo "PASS real Podkop transaction $outcome survives closed RPC/HUP; final state, private logs and parallel refusal verified"
+done
+unset MOCK_FAIL MOCK_HEALTH MOCK_ROLLBACK_HEALTH
+reset
+before=$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)
+if sh "$ROOT/scripts/home-net-management" podkop-update 0.7.25; then exit 1; fi
+if sh "$ROOT/scripts/home-net-management" podkop-update '0.7.24; reboot'; then exit 1; fi
+[ "$before" = "$(find "$HOME_NET_MANAGEMENT_CACHE/jobs" -mindepth 1 -maxdepth 1 -type d | wc -l)" ]
+echo 'PASS changed target and injection rejected before creating a Podkop worker'

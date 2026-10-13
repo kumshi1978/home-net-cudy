@@ -6,6 +6,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/bin" "$TMP/router/etc/config" "$TMP/router/etc/sing-box" "$TMP/router/etc/init.d" "$TMP/router/tmp/sing-box" "$TMP/router/tmp/podkop" "$TMP/backups"
 export MOCK_ROOT="$TMP" HOME_NET_PODKOP_ROOT="$TMP/router" HOME_NET_MANAGEMENT_BACKUPS="$TMP/backups" HOME_NET_UPDATE_LOCK_DIR="$TMP/lock" HOME_NET_UPDATE_HEALTH_STATE="$TMP/health" HOME_NET_PODKOP_INIT="$TMP/bin/service"
 export HOME_NET_TEST_REAL_DATE="$(command -v date)" HOME_NET_TEST_CLOCK_FILE="$TMP/clock"
+export HOME_NET_TEST_REAL_SLEEP="$(command -v sleep)"
 "$HOME_NET_TEST_REAL_DATE" +%s > "$TMP/clock"
 cp "$ROOT/tests/fixtures/podkop-date" "$TMP/bin/date"
 cp "$ROOT/tests/fixtures/podkop-nft" "$TMP/bin/nft"
@@ -72,6 +73,8 @@ while [ "$#" -gt 0 ]; do
  case "$1" in -o) out="$2"; shift 2 ;; --proto|--connect-timeout|--max-time) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
 done
 case "$url" in
+ *kumshi1978/home-net-cudy/releases/latest) printf '{"tag_name":"v1.7.4","draft":false,"prerelease":false}\n' > "$out" ;;
+ *raw.githubusercontent.com/kumshi1978/home-net-cudy/*/bundle.conf) printf "HOME_NET_BUNDLE_VERSION='1.7.4'\nUPDATE_ACTION_CLASS='SAFE'\n" > "$out" ;;
  */releases/latest) cp "$MOCK_ROOT/latest.json" "$out" ;;
  */releases/tags/0.7.22) cp "$MOCK_ROOT/old.json" "$out" ;;
  */releases/download/0.7.22/*) printf old > "$out" ;;
@@ -89,6 +92,14 @@ case "$*" in
   fi
   printf 0.7.22 > "$MOCK_ROOT/current"; echo rollback >> "$MOCK_ROOT/mutations" ;;
  *)
+  if [ -n "${MOCK_PODKOP_JOB_GATE:-}" ]; then
+   touch "$MOCK_PODKOP_JOB_GATE/ready"
+   for attempt in $(seq 1 1000); do
+    [ ! -f "$MOCK_PODKOP_JOB_GATE/released" ] || break
+    "$HOME_NET_TEST_REAL_SLEEP" 0.01
+   done
+   [ -f "$MOCK_PODKOP_JOB_GATE/released" ] || exit 99
+  fi
   echo install >> "$MOCK_ROOT/mutations"; printf 0.7.24 > "$MOCK_ROOT/current"
   printf changed > "$MOCK_ROOT/router/etc/sing-box/config.json"
   printf added > "$MOCK_ROOT/router/etc/sing-box/added.json"
@@ -112,11 +123,26 @@ cat > "$TMP/bin/jsonfilter" <<'EOF'
 node "$MOCK_ROOT/jsonfilter.cjs" "$@"
 EOF
 chmod +x "$TMP/bin/"*
+if [ "${MOCK_PKG_MANAGER:-opkg}" = apk ]; then
+ cat > "$TMP/bin/apk" <<'EOF'
+#!/bin/sh
+[ "$1" = add ] || exit 99
+case "$*" in *--no-network*) ;; *) exit 99 ;; esac
+case "$*" in *--allow-untrusted*) ;; *) exit 99 ;; esac
+case "$*" in
+ *--simulate*) echo '(1/2) Upgrading podkop (0.7.22-r1 -> 0.7.24-r1)'; echo '(2/2) Upgrading luci-app-podkop (0.7.22-r1 -> 0.7.24-r1)'; exit 0 ;;
+esac
+# Model explicit local APK file installation, including an old pinned file.
+# Shared fixture mutations/restoration are independent of package format.
+exec opkg --force-downgrade "$@"
+EOF
+ chmod 0755 "$TMP/bin/apk"
+fi
 node - "$TMP" <<'EOF'
 const fs=require('fs'),crypto=require('crypto'),root=process.argv[2];
 for(const [tag,contents,file] of [['0.7.22','old','old'],['0.7.24','new','latest']]){
  const digest='sha256:'+crypto.createHash('sha256').update(contents).digest('hex');
- fs.writeFileSync(root+'/'+file+'.json',JSON.stringify({tag_name:tag,draft:false,prerelease:false,assets:['podkop','luci-app-podkop'].map(p=>({name:p+'-v'+tag+'-r1-all.ipk',digest,browser_download_url:'https://github.com/itdoginfo/podkop/releases/download/'+tag+'/'+p+'-v'+tag+'-r1-all.ipk'}))}));
+ fs.writeFileSync(root+'/'+file+'.json',JSON.stringify({tag_name:tag,draft:false,prerelease:false,assets:['podkop','luci-app-podkop'].map(p=>{const name=process.env.MOCK_PKG_MANAGER==='apk'?p+'-'+tag+'-r1.apk':p+'-v'+tag+'-r1-all.ipk';return {name,digest,browser_download_url:'https://github.com/itdoginfo/podkop/releases/download/'+tag+'/'+name};})}));
 }
 EOF
 reset() {
@@ -134,6 +160,10 @@ reset() {
  rm -f "$TMP/router/etc/sing-box/added.json" "$TMP/router/tmp/sing-box/new.cache" "$TMP/router/etc/config/sing-box"
  rm -f "$TMP/mutations"
 }
+if [ "${HOME_NET_TEST_PODKOP_BACKGROUND:-0}" = 1 ]; then
+ . "$ROOT/tests/fixtures/podkop-background"
+ exit 0
+fi
 reset
 sh "$ROOT/scripts/home-net-podkop-update" update 0.7.24
 [ "$(cat "$TMP/current")" = 0.7.24 ]
