@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+fail() { echo "FAIL: $*" >&2; exit 1; }
+DIR=${1:-}
+[ -n "$DIR" ] || fail "usage: home-net-vpn-bundle-verify DIR"
+[ -d "$DIR" ] || fail "bundle directory missing"
+
+required="manifest.conf apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age SHA256SUMS"
+for file in $required; do [ -s "$DIR/$file" ] || fail "missing bundle file: $file"; done
+
+for file in apartment-main.conf apartment-backup.conf dacha-main.conf dacha-backup.conf; do
+  [ ! -e "$DIR/$file" ] || fail "plaintext config present: $file"
+done
+
+( cd "$DIR" && sha256sum -c SHA256SUMS )
+
+for file in apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age; do
+  head -n 1 "$DIR/$file" | grep -Fqx 'age-encryption.org/v1' || fail "not an age file: $file"
+done
+
+echo "PASS: encrypted VPN deployment bundle is Git-safe"
