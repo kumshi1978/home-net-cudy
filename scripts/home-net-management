@@ -187,6 +187,10 @@ podkop_log() {
     tail -n 200 "$(cat "$CACHE/podkop-job")/output.log"
 }
 case "${1:-}" in
+    vpn-rotation-stage|vpn-rotation-promote|vpn-rotation-rollback)
+        [ "$#" -eq 1 ] || fail 'invalid VPN rotation request'
+        exec /usr/bin/home-net-vpn-identity "${1#vpn-}"
+        ;;
     vpn-initialize)
         [ "$#" -eq 1 ] || fail 'invalid VPN initialization request'
         exec /usr/bin/home-net-vpn-identity initialize
