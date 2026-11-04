@@ -50,7 +50,7 @@ jobs:
         if: matrix.suite == 'vpn-router'
         run: |
           curl --fail --silent --show-error --location \
-            https://raw.githubusercontent.com/kumshi1978/openwrt-podkop-awg-failover/a17eea697601368ec2dcd55585dd6c40ed56c586/install.sh \
+            https://raw.githubusercontent.com/kumshi1978/openwrt-podkop-awg-failover/3ad80e17757cdb11705e8e201a6dbc422ed9ac23/install.sh \
             -o "$RUNNER_TEMP/failover-install.sh"
           printf 'HOME_NET_TEST_FAILOVER_INSTALLER=%s/failover-install.sh\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Offline regression tests
