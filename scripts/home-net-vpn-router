@@ -29,12 +29,13 @@ if [ "$action" = status ]; then
             current=recovery-required
         fi
     fi
-    printf "TRANSACTION_STATE='%s'\n" "$current"
+    lock_state=idle
     if command -v flock >/dev/null 2>&1 && [ -f "$maintenance" ] && [ ! -L "$maintenance" ]; then
         if ! (flock -n 9) 9<"$maintenance"; then
-            printf '%s\n' "TRANSACTION_LOCK='busy'"
+            lock_state=busy
         fi
     fi
+    printf "TRANSACTION_STATE='%s'\nTRANSACTION_LOCK='%s'\n" "$current" "$lock_state"
     exit 0
 fi
 [ -x "$adapter" ] || fail "router adapter required"
