@@ -72,4 +72,19 @@ if grep -R 'secret-apartment-main' "$TMP/output" >/dev/null 2>&1; then
   exit 1
 fi
 
+reject_bundle() {
+  if sh "$VERIFY" "$TMP/output" >/dev/null 2>&1; then
+    echo 'FAIL: unsafe bundle accepted' >&2
+    exit 1
+  fi
+}
+
+cp "$TMP/output/SHA256SUMS" "$TMP/checksums"
+(cd "$TMP/output" && sha256sum ../recipients.conf >>SHA256SUMS)
+reject_bundle
+cp "$TMP/checksums" "$TMP/output/SHA256SUMS"
+mv "$TMP/output/apartment-main.conf.age" "$TMP/payload"
+ln -s "$TMP/payload" "$TMP/output/apartment-main.conf.age"
+reject_bundle
+
 echo 'PASS: HOME NET VPN NAS import/encrypt controller'
