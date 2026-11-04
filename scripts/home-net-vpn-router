@@ -77,7 +77,7 @@ if [ "$action" = prepare ]; then
     active_slot
     previous=$active
     [ "$previous" != "$slot" ] || fail "manifest targets the active slot"
-    age -d -i "$config/age-identity.txt" -o "$tmp/client.conf" "$tmp/$router.conf.age" 2>/dev/null ||
+    age -d -i /etc/home-net/keys/age-identity.txt -o "$tmp/client.conf" "$tmp/$router.conf.age" 2>/dev/null ||
         fail "router decryption failed"
     [ -s "$tmp/client.conf" ] || fail "empty router config"
     run_adapter validate "$slot" "$tmp/client.conf" || fail "router config rejected"
