@@ -126,7 +126,7 @@ test "$(cat "$tmp/config/active")" = awg_main
     reject rollback
 ) 9>>"$TEST_MAINTENANCE"
 test -f "$TEST_MAINTENANCE"
-if run status | grep -q TRANSACTION_LOCK; then exit 1; fi
+run status | grep -qx "TRANSACTION_LOCK='idle'"
 run rollback
 test "$(cat "$tmp/config/active")" = awg_main
 run status | grep -qx "TRANSACTION_STATE='rolled-back'"
