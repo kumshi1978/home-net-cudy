@@ -143,6 +143,11 @@ logs_cmd() {
 }
 
 case "${1:-status}" in
+    vpn-secure)
+        [ "$#" -eq 1 ] || exit 2
+        /usr/bin/home-net-vpn-identity status || exit 1
+        /usr/bin/home-net-vpn-router status
+        ;;
     status) status_cmd ;;
     settings) settings_cmd ;;
     logs) shift; logs_cmd "${1:-all}" "${2:-all}" "${3:-100}" ;;
