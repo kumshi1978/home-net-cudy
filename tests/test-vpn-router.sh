@@ -5,7 +5,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/config" "$tmp/bundle"
 export TEST_CONFIG="$tmp/config"
-sed 's@^config=/etc/home-net/vpn$@config=$TEST_CONFIG@; /root required/d' \
+export TEST_MAINTENANCE="$tmp/maintenance.lock"
+sed 's@^maintenance=/var/run/home-net-vpn-maintenance.lock$@maintenance=$TEST_MAINTENANCE@; s@^config=/etc/home-net/vpn$@config=$TEST_CONFIG@; /root required/d' \
     "$root/scripts/home-net-vpn-router" >"$tmp/router"
 cp "$root/scripts/home-net-vpn-manifest-validate" "$tmp/"
 chmod +x "$tmp/home-net-vpn-manifest-validate"
@@ -94,11 +95,21 @@ run status | grep -qx "TRANSACTION_STATE='recovery-required'"
 reject verify
 reject promote
 test "$(cat "$tmp/config/active")" = awg_main
-mkdir "$tmp/config/lock"
-run status | grep -qx "TRANSACTION_LOCK='present'"
-reject rollback
-rmdir "$tmp/config/lock"
+(
+    flock -n 9
+    run status | grep -qx "TRANSACTION_LOCK='busy'"
+    reject rollback
+) 9>>"$TEST_MAINTENANCE"
+test -f "$TEST_MAINTENANCE"
+if run status | grep -q TRANSACTION_LOCK; then exit 1; fi
 run rollback
 test "$(cat "$tmp/config/active")" = awg_main
 run status | grep -qx "TRANSACTION_STATE='rolled-back'"
-echo 'PASS: router deployment lifecycle and reboot fencing'
+mv "$tmp/config/transaction" "$tmp/rebooted"
+run prepare "$tmp/bundle" "$digest"
+run verify
+echo awg_backup >"$tmp/config/active"
+reject promote
+run status | grep -qx "TRANSACTION_STATE='recovery-required'"
+test "$(cat "$tmp/config/active")" = awg_backup
+echo 'PASS: router lifecycle, maintenance contention and reboot fencing'
