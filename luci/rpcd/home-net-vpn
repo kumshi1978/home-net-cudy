@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+umask 077
+
+reply() { printf '{"status":"%s"}\n' "$1"; }
+case "${1:-}:${2:-}:$#" in
+    list::1)
+        printf '%s\n' '{"prepare":{"deployment":"String","country":"String","ciphertext":"String"}}'
+        exit 0
+        ;;
+    call:prepare:2) ;;
+    *) exit 1 ;;
+esac
+
+tmp=$(mktemp -d /tmp/home-net-vpn-rpc.XXXXXX) || { reply failed; exit 0; }
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+
+if ! timeout 5 head -c 88001 >"$tmp/request" || [ "$(wc -c <"$tmp/request")" -gt 88000 ]; then
+    reply invalid
+    exit 0
+fi
+deployment=$(jsonfilter -i "$tmp/request" -e '@.deployment' 2>/dev/null) || { reply invalid; exit 0; }
+country=$(jsonfilter -i "$tmp/request" -e '@.country' 2>/dev/null) || { reply invalid; exit 0; }
+ciphertext=$(jsonfilter -i "$tmp/request" -e '@.ciphertext' 2>/dev/null) || { reply invalid; exit 0; }
+case "$deployment" in ''|*[!A-Za-z0-9._-]*) reply invalid; exit 0 ;; esac
+case "$country" in [A-Z][A-Z]) ;; *) reply invalid; exit 0 ;; esac
+case "$ciphertext" in ''|*[!A-Za-z0-9+/=]*) reply invalid; exit 0 ;; esac
+if [ "${#deployment}" -gt 64 ] || [ "${#ciphertext}" -gt 87384 ]; then
+    reply invalid
+    exit 0
+fi
+if ! printf '%s' "$ciphertext" | base64 -d >"$tmp/candidate.age" 2>/dev/null ||
+   [ "$(wc -c <"$tmp/candidate.age")" -gt 65536 ]; then
+    reply invalid
+    exit 0
+fi
+unset ciphertext
+if /usr/bin/home-net-vpn-router prepare-upload "$deployment" "$country" <"$tmp/candidate.age" >/dev/null 2>&1; then
+    reply prepared
+else
+    reply failed
+fi
