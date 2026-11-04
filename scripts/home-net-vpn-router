@@ -14,6 +14,7 @@ base=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 config=/etc/home-net/vpn
 state=$config/transaction
 adapter=$config/adapter
+maintenance=/var/run/home-net-vpn-maintenance.lock
 boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || fail "boot identifier unavailable"
 
 if [ "$action" = status ]; then
@@ -29,17 +30,24 @@ if [ "$action" = status ]; then
         fi
     fi
     printf "TRANSACTION_STATE='%s'\n" "$current"
-    if [ -d "$config/lock" ]; then printf '%s\n' "TRANSACTION_LOCK='present'"; fi
+    if command -v flock >/dev/null 2>&1 && [ -f "$maintenance" ] && [ ! -L "$maintenance" ]; then
+        if ! (flock -n 9) 9<"$maintenance"; then
+            printf '%s\n' "TRANSACTION_LOCK='busy'"
+        fi
+    fi
     exit 0
 fi
 [ -x "$adapter" ] || fail "router adapter required"
-mkdir "$config/lock" || fail "locked or interrupted operation"
+command -v flock >/dev/null 2>&1 || fail "maintenance locking unavailable"
+[ ! -L "$maintenance" ] || fail "unsafe maintenance lock"
+[ ! -e "$maintenance" ] || [ -f "$maintenance" ] || fail "unsafe maintenance lock"
+exec 9>>"$maintenance"
+flock -n 9 || fail "VPN maintenance is busy"
 tmp=
 record=
 cleanup() {
     if [ -n "$tmp" ]; then rm -rf "$tmp"; fi
     if [ -n "$record" ]; then rm -rf "$record"; fi
-    rmdir "$config/lock"
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -148,9 +156,12 @@ case "$action" in
         ;;
     promote)
         [ "$current" = verified ] || fail "verify required"
-        phase prepared
         active_slot
-        [ "$active" = "$previous" ] || fail "active slot changed"
+        if [ "$active" != "$previous" ]; then
+            phase recovery-required
+            fail "active slot changed; recovery required"
+        fi
+        phase prepared
         run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
         phase promoting
         if run_adapter promote "$previous" "$slot" &&
