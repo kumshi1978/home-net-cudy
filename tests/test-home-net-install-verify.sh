@@ -106,6 +106,23 @@ fi
 exec "$HOME_NET_TEST_REAL_CP" "$@"
 EOF
 chmod 0755 "$TMP/bin/cp"
+# Scope only crypto executable discovery to a controlled fixture.
+export HOME_NET_TEST_CRYPTO_PATH="$TMP/crypto"
+mkdir "$HOME_NET_TEST_CRYPTO_PATH"
+sed 's/command -v age/PATH="$HOME_NET_TEST_CRYPTO_PATH" command -v age/g' \
+ "$TMP/install.ready" > "$TMP/install.crypto"
+mv "$TMP/install.crypto" "$TMP/install.ready"
+
+for config in network podkop; do
+ printf 'legacy %s fixture\n' "$config" > "$TMP/root/etc/config/$config"
+done
+printf 'legacy failover fixture\n' > "$TMP/root/etc/podkop-awg-failover.conf"
+legacy_snapshot() {
+ sha256sum "$TMP/root/etc/config/network" "$TMP/root/etc/config/podkop" \
+  "$TMP/root/etc/podkop-awg-failover.conf"
+}
+legacy_snapshot > "$TMP/legacy.before"
+
 if [ "${HOME_NET_TEST_LUCI_UPGRADE:-0}" = 1 ]; then
  . "$REPO/tests/fixtures/luci-detached-upgrade"
  exit 0
@@ -115,6 +132,12 @@ grep -q 'fixture: LuCI copy failed' "$TMP/partial-output"
 sh "$REPO/scripts/home-net-install-verify" runtime
 echo 'PASS early LuCI failure leaves every copied runtime helper/init executable'
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
+grep -qx 'VPN crypto tools unavailable; Legacy VPN remains available' "$TMP/output"
+[ ! -e "$TMP/root/etc/home-net/keys/age-identity.txt" ]
+legacy_snapshot > "$TMP/legacy.after"
+cmp "$TMP/legacy.before" "$TMP/legacy.after"
+echo 'PASS install without age preserves legacy VPN and failover'
+
 [ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/output")" = 1 ]
 if grep -q 'FAIL: health cycle predates initialization' "$TMP/output"; then exit 1; fi
 echo 'PASS health retries report waiting once and suppress intermediate FAIL noise'
@@ -130,10 +153,30 @@ echo 'PASS actual installer under umask 077; one-shot Podkop accepted without se
 printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/home-net-update.state"
 cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
 MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
-grep -q 'HOME NET Podkop Monitor v1.7.4 installed' "$TMP/race-output"
+grep -q 'HOME NET Podkop Monitor v1.8.0 installed' "$TMP/race-output"
 if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
 cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'
+for tool in age age-keygen; do
+ printf '%s\n' '#!/bin/sh' 'exit 91' > "$HOME_NET_TEST_CRYPTO_PATH/$tool"
+ chmod 0755 "$HOME_NET_TEST_CRYPTO_PATH/$tool"
+done
+MOCK_FIRST_CYCLE_COMPLETE=1 sh "$TMP/install.ready" > "$TMP/crypto-output"
+grep -qx 'VPN crypto tools available' "$TMP/crypto-output"
+key="$TMP/root/etc/home-net/keys/age-identity.txt"
+[ ! -e "$key" ]
+mkdir -p "$(dirname "$key")"
+chmod 0700 "$(dirname "$key")"
+(umask 077; printf '%s\n' 'identity fixture' > "$key")
+sha256sum "$key" > "$TMP/identity.before"
+for attempt in upgrade repeat; do
+ MOCK_FIRST_CYCLE_COMPLETE=1 sh "$TMP/install.ready" > "$TMP/$attempt-output"
+ sha256sum -c "$TMP/identity.before"
+ legacy_snapshot > "$TMP/legacy.after"
+ cmp "$TMP/legacy.before" "$TMP/legacy.after"
+done
+echo 'PASS crypto availability does not enroll; repeat upgrade preserves VPN and identity'
+
 # Reproduce rpcd's disappearing output reader with a real FIFO. rpcd ignores
 # SIGPIPE; shell builtins then report EPIPE and set -e aborts on progress echo.
 # The legacy installer restarted rpcd regardless of the in-progress flag.

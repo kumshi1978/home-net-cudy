@@ -16,6 +16,11 @@
         "/usr/bin/home-net-management": [
           "exec"
         ]
+      },
+      "ubus": {
+        "home-net-vpn": [
+          "prepare"
+        ]
       }
     }
   }

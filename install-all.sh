@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.4}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.8.0}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
-TMP_DIR="/tmp/home-net-bundle.$$"
+TMP_DIR="$(mktemp -d /tmp/home-net-bundle.XXXXXX)" || exit 1
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
 FAILOVER_INSTALL="$TMP_DIR/failover-install.sh"
 MONITORING_INSTALL="$TMP_DIR/monitoring-install.sh"
@@ -236,6 +236,7 @@ fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 
 valid_payload_sha "${MONITORING_BOOTSTRAP_REF:-}" || fail "MONITORING_BOOTSTRAP_REF must be a full commit SHA"
 valid_payload_sha "${HOME_NET_UPDATER_REF:-}" || fail "HOME_NET_UPDATER_REF must be a full commit SHA"
+valid_payload_sha "${FAILOVER_REF:-}" || fail "FAILOVER_REF must be a full commit SHA"
 
 case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) fail "invalid UPDATE_ACTION_CLASS in bundle.conf" ;; esac
 ACTION_CLASS="${HOME_NET_ACTION_CLASS:-$UPDATE_ACTION_CLASS}"
@@ -260,7 +261,7 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_BUNDLE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION=unknown
 
-FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
+FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/$FAILOVER_REF/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
 HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/scripts/home-net-update"
 HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/init.d/home-net-update"
@@ -296,7 +297,7 @@ if [ "${HOME_NET_STAGE_ONLY:-0}" = "1" ]; then
     printf '\n===== STAGE ONLY: RUNTIME FAILOVER ACTIVATION SKIPPED =====\n'
 elif [ "$NEED_FAILOVER" = "1" ]; then
     printf '\n===== INSTALL FAILOVER (CONTROLLED) =====\n'
-    UPDATE_SOURCE_REF="v$FAILOVER_VERSION" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
+    UPDATE_SOURCE_REF="$FAILOVER_REF" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
 else
     printf '\n===== FAILOVER ALREADY AT REQUIRED VERSION =====\n'
 fi

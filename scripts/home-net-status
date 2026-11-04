@@ -143,6 +143,28 @@ logs_cmd() {
 }
 
 case "${1:-status}" in
+    vpn-secure)
+        [ "$#" -eq 1 ] || exit 2
+        identity_status="$(/usr/bin/home-net-vpn-identity status)" || exit 1
+        transaction_status="$(/usr/bin/home-net-vpn-router status)" || exit 1
+        printf '%s\n%s\n' "$identity_status" "$transaction_status"
+        identity_state="$(printf '%s\n' "$identity_status" | sed -n "s/^IDENTITY_STATUS='\([^']*\)'$/\1/p")"
+        transaction_state="$(printf '%s\n' "$transaction_status" | sed -n "s/^TRANSACTION_STATE='\([^']*\)'$/\1/p")"
+        case "$identity_state" in
+            UNAVAILABLE) crypto=unavailable ;;
+            *) crypto=available ;;
+        esac
+        case "$transaction_state" in
+            promoted) vpn_mode=Secure ;;
+            *) vpn_mode=Legacy ;;
+        esac
+        migration=no
+        if [ "$identity_state" = READY ]; then
+            case "$transaction_state" in idle|rolled-back) migration=yes ;; esac
+        fi
+        printf "CRYPTO_SUPPORT='%s'\nVPN_MODE='%s'\nMIGRATION_AVAILABLE='%s'\n" \
+            "$crypto" "$vpn_mode" "$migration"
+        ;;
     status) status_cmd ;;
     settings) settings_cmd ;;
     logs) shift; logs_cmd "${1:-all}" "${2:-all}" "${3:-100}" ;;

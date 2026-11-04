@@ -1,0 +1,85 @@
+#!/bin/sh
+# NAS-side import/encrypt controller for HOME NET VPN deployments.
+set -eu
+umask 077
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+usage() {
+  echo "usage: home-net-vpn-import --source DIR --recipients FILE --output DIR"
+}
+
+SOURCE=
+RECIPIENTS=
+OUTPUT=
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --source) [ "$#" -ge 2 ] || fail "--source requires a value"; SOURCE=$2; shift 2 ;;
+    --recipients) [ "$#" -ge 2 ] || fail "--recipients requires a value"; RECIPIENTS=$2; shift 2 ;;
+    --output) [ "$#" -ge 2 ] || fail "--output requires a value"; OUTPUT=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) fail "unknown argument: $1" ;;
+  esac
+done
+
+[ -n "$SOURCE" ] || fail "--source is required"
+[ -n "$RECIPIENTS" ] || fail "--recipients is required"
+[ -n "$OUTPUT" ] || fail "--output is required"
+command -v age >/dev/null 2>&1 || fail "age is required"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
+[ -d "$SOURCE" ] || fail "source directory not found"
+[ -r "$RECIPIENTS" ] || fail "recipient registry not readable"
+
+BASE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+[ -x "$BASE/home-net-vpn-manifest-validate" ] || fail "manifest validator missing"
+MANIFEST="$SOURCE/manifest.conf"
+"$BASE/home-net-vpn-manifest-validate" "$MANIFEST" >/dev/null
+
+. "$RECIPIENTS"
+
+validate_recipient() {
+  name=$1
+  value=$2
+  case "$value" in age1*) ;; *) fail "$name must be an age public recipient" ;; esac
+}
+
+validate_recipient NAS_RECIPIENT "${NAS_RECIPIENT:-}"
+validate_recipient RECOVERY_RECIPIENT "${RECOVERY_RECIPIENT:-}"
+validate_recipient APARTMENT_MAIN_RECIPIENT "${APARTMENT_MAIN_RECIPIENT:-}"
+validate_recipient APARTMENT_BACKUP_RECIPIENT "${APARTMENT_BACKUP_RECIPIENT:-}"
+validate_recipient DACHA_MAIN_RECIPIENT "${DACHA_MAIN_RECIPIENT:-}"
+validate_recipient DACHA_BACKUP_RECIPIENT "${DACHA_BACKUP_RECIPIENT:-}"
+
+TMP=$(mktemp -d)
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT HUP INT TERM
+mkdir -p "$OUTPUT"
+cp "$MANIFEST" "$TMP/manifest.conf"
+
+encrypt_one() {
+  router=$1
+  router_recipient=$2
+  input="$SOURCE/$router.conf"
+  output="$TMP/$router.conf.age"
+  [ -s "$input" ] || fail "missing plaintext config: $input"
+  age -r "$NAS_RECIPIENT" -r "$router_recipient" -r "$RECOVERY_RECIPIENT" -o "$output" "$input"
+  [ -s "$output" ] || fail "encryption produced an empty file for $router"
+}
+
+encrypt_one apartment-main "$APARTMENT_MAIN_RECIPIENT"
+encrypt_one apartment-backup "$APARTMENT_BACKUP_RECIPIENT"
+encrypt_one dacha-main "$DACHA_MAIN_RECIPIENT"
+encrypt_one dacha-backup "$DACHA_BACKUP_RECIPIENT"
+
+(
+  cd "$TMP"
+  sha256sum manifest.conf apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age > SHA256SUMS
+)
+
+for file in manifest.conf apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age SHA256SUMS; do
+  cp "$TMP/$file" "$OUTPUT/$file"
+  chmod 600 "$OUTPUT/$file"
+done
+
+echo "PASS: encrypted deployment prepared at $OUTPUT"

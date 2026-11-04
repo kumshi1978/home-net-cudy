@@ -1,0 +1,80 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+manifest=${1:-}
+[ -n "$manifest" ] || fail "usage: home-net-vpn-manifest-validate MANIFEST"
+[ -r "$manifest" ] || fail "manifest not readable"
+
+# Parse literal, unique allowlisted assignments without evaluating the file.
+parsed=$(awk -F "'" '
+    /^[[:space:]]*($|#)/ { next }
+    NF != 3 || $1 !~ /^[A-Z_]+=$/ || $3 !~ /^[[:space:]]*$/ { exit 1 }
+    $1 !~ /^(FORMAT_VERSION|DEPLOYMENT_ID|CREATED_AT|COUNTRY|TARGET_SLOT|ROUTERS|PROVIDER|SERVER_LABEL|REASON|PREVIOUS_DEPLOYMENT)=$/ { exit 1 }
+    seen[$1]++ { exit 1 }
+    { print $1 $2 }
+' "$manifest") || fail "manifest contains unsupported syntax or fields"
+
+FORMAT_VERSION=
+DEPLOYMENT_ID=
+CREATED_AT=
+COUNTRY=
+TARGET_SLOT=
+ROUTERS=
+while IFS='=' read -r key value; do
+    case "$key" in
+        FORMAT_VERSION) FORMAT_VERSION=$value ;;
+        DEPLOYMENT_ID) DEPLOYMENT_ID=$value ;;
+        CREATED_AT) CREATED_AT=$value ;;
+        COUNTRY) COUNTRY=$value ;;
+        TARGET_SLOT) TARGET_SLOT=$value ;;
+        ROUTERS) ROUTERS=$value ;;
+    esac
+done <<EOF
+$parsed
+EOF
+set -f
+
+[ "${FORMAT_VERSION:-}" = "1" ] || fail "FORMAT_VERSION must be 1"
+
+case "${DEPLOYMENT_ID:-}" in
+    ''|*[!A-Za-z0-9._-]*) fail "invalid DEPLOYMENT_ID" ;;
+esac
+
+case "${COUNTRY:-}" in
+    [A-Z][A-Z]) ;;
+    *) fail "COUNTRY must be a two-letter uppercase code" ;;
+esac
+
+case "${TARGET_SLOT:-}" in
+    awg_main|awg_backup) ;;
+    *) fail "TARGET_SLOT must be awg_main or awg_backup" ;;
+esac
+
+[ -n "${CREATED_AT:-}" ] || fail "CREATED_AT missing"
+[ -n "${ROUTERS:-}" ] || fail "ROUTERS missing"
+
+seen=""
+for router in $ROUTERS; do
+    case "$router" in
+        apartment-main|apartment-backup|dacha-main|dacha-backup) ;;
+        *) fail "unknown router id: $router" ;;
+    esac
+    case " $seen " in
+        *" $router "*) fail "duplicate router id: $router" ;;
+    esac
+    seen="$seen $router"
+done
+
+for required in apartment-main apartment-backup dacha-main dacha-backup; do
+    case " $seen " in
+        *" $required "*) ;;
+        *) fail "required router missing: $required" ;;
+    esac
+done
+
+echo "PASS: deployment manifest $DEPLOYMENT_ID is valid"

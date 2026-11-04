@@ -2,7 +2,7 @@ const fs=require('fs'),assert=require('assert'),path=require('path');
 const root=path.resolve(__dirname,'..');
 const calls=[],polls=[];let releaseClass='SAFE',modal,workerStatus='NONE',installed='1.6.0',podkopWorkerStatus='NONE',podkopVersion='0.7.22';
 function E(tag,attrs,children){return {tag,attrs:attrs || {},children:Array.isArray(children)?children:[children],disabled:attrs && attrs.disabled,value:attrs && attrs.value || (tag==='select' && children[0].attrs.value),checked:attrs && attrs.checked,replaceChildren(...c){this.children=c},appendChild(c){this.children.push(c)},addEventListener(name,fn){this.attrs[name]=fn}}}
-const rpc={exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-latest')workerStatus='RUNNING';if(args[0]==='podkop-update')podkopWorkerStatus='RUNNING';const output={
+const rpc={declare:spec=>async(...args)=>{calls.push({rpc:spec,args});return {status:'prepared'}},exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-latest')workerStatus='RUNNING';if(args[0]==='podkop-update')podkopWorkerStatus='RUNNING';const output={
  preview:'TARGET=v1.7.0\nCLASS='+releaseClass+'\n',
  'install-status':'STATUS='+workerStatus+'\nTARGET=v1.7.0\n',
  'podkop-status':'STATUS='+podkopWorkerStatus+'\nTARGET=0.7.24\nCURRENT_VERSION='+podkopVersion+'\n',
@@ -47,7 +47,9 @@ const data=[{stdout:'BUNDLE_INSTALLED=1.6.0\nBUNDLE_ACTIVE=1.6.0\nSTATUS=OK\nUPD
  assert.deepEqual(Object.keys(acl['luci-app-home-net'].write.file).sort(),['/usr/bin/home-net-control','/usr/bin/home-net-management']);
  const menu=JSON.parse(fs.readFileSync(path.join(root,'luci/menu.d/luci-app-home-net.json')));
  for(const p of ['overview','updates','logs','vpn','settings'])assert(menu['admin/services/home-net/'+p]);
- for(const file of ['status','updates','logs','vpn','settings'])new Function('view','management',fs.readFileSync(path.join(root,'luci/view/home-net/'+file+'.js'),'utf8'))({extend:x=>x},common);
+ for(const file of ['status','updates','logs','settings'])new Function('view','management',fs.readFileSync(path.join(root,'luci/view/home-net/'+file+'.js'),'utf8'))({extend:x=>x},common);
+ const vpnSource=fs.readFileSync(path.join(root,'luci/view/home-net/vpn.js'),'utf8');
+ new Function('view','fs','ui','rpc','management','E','window',vpnSource)({extend:x=>x},{exec:async()=>({code:0,stdout:'',stderr:''})},ui,rpc,common,E,{confirm:()=>true});
  // Exercise the same UI actions in both languages; transport arguments stay English.
  for(const language of ['ru','ru-RU','en','de','']){
   const russian=/^ru/.test(language),localPolls=[],confirmations=[],notices=[];

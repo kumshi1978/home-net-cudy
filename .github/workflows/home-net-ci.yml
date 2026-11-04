@@ -30,6 +30,11 @@ jobs:
           - candidate-packaging
           - release-packaging
           - component-update-policy
+          - home-net-vpn-manifest-validate
+          - home-net-vpn-import
+          - vpn-router
+          - vpn-identity
+          - vpn-cudy-adapter
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,7 +44,15 @@ jobs:
         run: |
           sh -n scripts/home-net-update
           sh -n install-all.sh
+          sh -n install/install.sh
           sh -n "tests/test-${{ matrix.suite }}.sh"
+      - name: Fetch pinned failover coordination fixture
+        if: matrix.suite == 'vpn-router'
+        run: |
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/kumshi1978/openwrt-podkop-awg-failover/4b0d3ad72bd38d456485fd59ecd723d94dfe7fcf/install.sh \
+            -o "$RUNNER_TEMP/failover-install.sh"
+          printf 'HOME_NET_TEST_FAILOVER_INSTALLER=%s/failover-install.sh\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Offline regression tests
         run: sh "tests/test-${{ matrix.suite }}.sh"
       - name: Whitespace validation

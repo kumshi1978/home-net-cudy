@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+fail() { echo "FAIL: $*" >&2; exit 1; }
+DIR=${1:-}
+[ -n "$DIR" ] || fail "usage: home-net-vpn-bundle-verify DIR"
+[ -d "$DIR" ] || fail "bundle directory missing"
+
+required="manifest.conf apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age SHA256SUMS"
+for file in $required; do
+  [ -f "$DIR/$file" ] && [ ! -L "$DIR/$file" ] && [ -s "$DIR/$file" ] ||
+    fail "missing or unsafe bundle file: $file"
+done
+
+for file in apartment-main.conf apartment-backup.conf dacha-main.conf dacha-backup.conf; do
+  [ ! -e "$DIR/$file" ] || fail "plaintext config present: $file"
+done
+
+# Hash fixed names only. The checksum list is data and never supplies paths.
+(
+  cd "$DIR" || exit 1
+  actual=$(sha256sum manifest.conf apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age) || exit 1
+  expected=$(LC_ALL=C sort SHA256SUMS) || exit 1
+  [ "$(printf '%s\n' "$actual" | LC_ALL=C sort)" = "$expected" ]
+) || fail "invalid bundle checksums"
+
+for file in apartment-main.conf.age apartment-backup.conf.age dacha-main.conf.age dacha-backup.conf.age; do
+  head -n 1 "$DIR/$file" | grep -Fqx 'age-encryption.org/v1' || fail "not an age file: $file"
+done
+
+echo "PASS: encrypted VPN bundle format and checksums verified"
