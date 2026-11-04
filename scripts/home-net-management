@@ -191,6 +191,10 @@ case "${1:-}" in
         [ "$#" -eq 1 ] || fail 'invalid VPN rotation request'
         exec /usr/bin/home-net-vpn-identity "${1#vpn-}"
         ;;
+    vpn-verify|vpn-promote|vpn-rollback)
+        [ "$#" -eq 1 ] || fail 'invalid VPN transaction request'
+        exec /usr/bin/home-net-vpn-router "${1#vpn-}"
+        ;;
     vpn-initialize)
         [ "$#" -eq 1 ] || fail 'invalid VPN initialization request'
         exec /usr/bin/home-net-vpn-identity initialize
