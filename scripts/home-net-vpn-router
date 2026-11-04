@@ -1,0 +1,146 @@
+#!/bin/sh
+set -eu
+umask 077
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail "root required"
+action=${1:-}
+case "$action:$#" in
+    prepare:3|verify:1|promote:1|rollback:1) ;;
+    *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | verify | promote | rollback" ;;
+esac
+
+base=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+config=/etc/home-net/vpn
+state=$config/transaction
+adapter=$config/adapter
+[ -x "$adapter" ] || fail "router adapter required"
+mkdir "$config/lock" || fail "locked or interrupted operation"
+tmp=
+record=
+cleanup() {
+    if [ -n "$tmp" ]; then rm -rf "$tmp"; fi
+    if [ -n "$record" ]; then rm -rf "$record"; fi
+    rmdir "$config/lock"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+run_adapter() {
+    "$adapter" "$@" >/dev/null 2>&1
+}
+
+digest() {
+    sha256sum <"$1" | cut -d ' ' -f 1
+}
+
+phase() {
+    printf '%s\n' "$1" >"$state/next" && mv -f "$state/next" "$state/phase"
+}
+
+active_slot() {
+    active=$("$adapter" active 2>/dev/null) || fail "cannot determine active slot"
+    case "$active" in awg_main|awg_backup) ;; *) fail "invalid active slot";; esac
+}
+
+restore() {
+    phase restoring || return 1
+    run_adapter restore "$previous" "$slot" "$state/backup" || return 1
+    active_slot
+    [ "$active" = "$previous" ] || return 1
+    run_adapter check-restored "$previous" "$slot" "$state/backup" || return 1
+    phase rolled-back
+}
+
+if [ "$action" = prepare ]; then
+    [ ! -e "$state" ] || fail "transaction exists"
+    bundle=$2
+    expected=$3
+    case "$expected" in ''|*[!0-9a-f]*) fail "invalid trusted digest";; esac
+    [ "${#expected}" -eq 64 ] || fail "invalid trusted digest"
+    router=$(cat "$config/router-id")
+    case "$router" in apartment-main|apartment-backup|dacha-main|dacha-backup) ;;
+        *) fail "invalid local router ID";;
+    esac
+    tmp=$(mktemp -d /tmp/home-net-vpn.XXXXXX)
+    cp "$bundle/manifest.conf" "$bundle/SHA256SUMS" "$bundle/$router.conf.age" "$tmp/"
+    # The operator supplies the digest of SHA256SUMS from a trusted immutable commit.
+    [ "$(digest "$tmp/SHA256SUMS")" = "$expected" ] || fail "bundle digest mismatch"
+    for file in manifest.conf "$router.conf.age"; do
+        hash=$(awk -v file="$file" '{ sub(/^\*/, "", $2); if ($2 == file) print $1 }' "$tmp/SHA256SUMS")
+        [ "$(digest "$tmp/$file")" = "$hash" ] || fail "artifact digest mismatch"
+    done
+    manifest=$tmp/manifest.conf
+    "$base/home-net-vpn-manifest-validate" "$manifest" >/dev/null
+    slot=$(sed -n "s/^TARGET_SLOT='\([^']*\)'.*$/\1/p" "$manifest")
+    country=$(sed -n "s/^COUNTRY='\([^']*\)'.*$/\1/p" "$manifest")
+    active_slot
+    previous=$active
+    [ "$previous" != "$slot" ] || fail "manifest targets the active slot"
+    age -d -i "$config/age-identity.txt" -o "$tmp/client.conf" "$tmp/$router.conf.age" 2>/dev/null ||
+        fail "router decryption failed"
+    [ -s "$tmp/client.conf" ] || fail "empty router config"
+    run_adapter validate "$slot" "$tmp/client.conf" || fail "router config rejected"
+
+    # Publish the complete rollback record before changing any interface.
+    record=$(mktemp -d "$config/.record.XXXXXX")
+    mkdir "$record/backup"
+    run_adapter snapshot "$previous" "$slot" "$record/backup" || fail "backup failed"
+    printf '%s\n' "$previous" "$slot" "$country" >"$record/metadata"
+    printf '%s\n' preparing >"$record/phase"
+    mv "$record" "$state"
+    record=
+    if ! run_adapter stage "$previous" "$slot" "$tmp/client.conf"; then
+        restore || fail "stage failed and rollback requires operator recovery"
+        fail "stage failed and backup was restored"
+    fi
+    if [ "$("$adapter" active 2>/dev/null)" != "$previous" ]; then
+        restore || fail "unexpected active slot and rollback requires operator recovery"
+        fail "unexpected active slot and backup was restored"
+    fi
+    phase prepared
+    exit 0
+fi
+
+[ -f "$state/phase" ] || fail "transaction missing"
+current=$(cat "$state/phase")
+{
+    read -r previous
+    read -r slot
+    read -r country
+} <"$state/metadata"
+case "$previous:$slot" in awg_main:awg_backup|awg_backup:awg_main) ;;
+    *) fail "invalid rollback metadata";;
+esac
+case "$country" in [A-Z][A-Z]) ;; *) fail "invalid rollback metadata";; esac
+
+case "$action" in
+    verify)
+        case "$current" in prepared|verified) ;; *) fail "candidate is not prepared";; esac
+        phase prepared
+        active_slot
+        [ "$active" = "$previous" ] || fail "active slot changed"
+        run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
+        phase verified
+        ;;
+    promote)
+        [ "$current" = verified ] || fail "verify required"
+        phase prepared
+        active_slot
+        [ "$active" = "$previous" ] || fail "active slot changed"
+        run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
+        phase promoting
+        if run_adapter promote "$previous" "$slot" &&
+            [ "$("$adapter" active 2>/dev/null)" = "$slot" ] &&
+            run_adapter check-promoted "$slot" "$country"; then
+            phase promoted
+        else
+            restore || fail "promotion failed and rollback requires operator recovery"
+            fail "promotion failed and backup was restored"
+        fi
+        ;;
+    rollback)
+        [ "$current" != rolled-back ] || exit 0
+        restore || fail "rollback requires operator recovery"
+        ;;
+esac

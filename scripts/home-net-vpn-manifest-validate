@@ -10,18 +10,34 @@ manifest=${1:-}
 [ -n "$manifest" ] || fail "usage: home-net-vpn-manifest-validate MANIFEST"
 [ -r "$manifest" ] || fail "manifest not readable"
 
-# Reject obvious secret-bearing field names before sourcing.
-if grep -Eiq '(^|[[:space:]_])(private.?key|preshared.?key|password|secret|token)[[:space:]]*=' "$manifest"; then
-    fail "manifest contains a forbidden secret field"
-fi
+# Parse literal, unique allowlisted assignments without evaluating the file.
+parsed=$(awk -F "'" '
+    /^[[:space:]]*($|#)/ { next }
+    NF != 3 || $1 !~ /^[A-Z_]+=$/ || $3 !~ /^[[:space:]]*$/ { exit 1 }
+    $1 !~ /^(FORMAT_VERSION|DEPLOYMENT_ID|CREATED_AT|COUNTRY|TARGET_SLOT|ROUTERS|PROVIDER|SERVER_LABEL|REASON|PREVIOUS_DEPLOYMENT)=$/ { exit 1 }
+    seen[$1]++ { exit 1 }
+    { print $1 $2 }
+' "$manifest") || fail "manifest contains unsupported syntax or fields"
 
-# Only simple uppercase assignments and comments are accepted.
-if grep -Ev '^[[:space:]]*($|#|[A-Z0-9_]+='''[^''']*'''[[:space:]]*)$' "$manifest" | grep -q .; then
-    fail "manifest contains unsupported syntax"
-fi
-
-# shellcheck disable=SC1090
-. "$manifest"
+FORMAT_VERSION=
+DEPLOYMENT_ID=
+CREATED_AT=
+COUNTRY=
+TARGET_SLOT=
+ROUTERS=
+while IFS='=' read -r key value; do
+    case "$key" in
+        FORMAT_VERSION) FORMAT_VERSION=$value ;;
+        DEPLOYMENT_ID) DEPLOYMENT_ID=$value ;;
+        CREATED_AT) CREATED_AT=$value ;;
+        COUNTRY) COUNTRY=$value ;;
+        TARGET_SLOT) TARGET_SLOT=$value ;;
+        ROUTERS) ROUTERS=$value ;;
+    esac
+done <<EOF
+$parsed
+EOF
+set -f
 
 [ "${FORMAT_VERSION:-}" = "1" ] || fail "FORMAT_VERSION must be 1"
 
