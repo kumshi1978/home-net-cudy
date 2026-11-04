@@ -47,7 +47,9 @@ const data=[{stdout:'BUNDLE_INSTALLED=1.6.0\nBUNDLE_ACTIVE=1.6.0\nSTATUS=OK\nUPD
  assert.deepEqual(Object.keys(acl['luci-app-home-net'].write.file).sort(),['/usr/bin/home-net-control','/usr/bin/home-net-management']);
  const menu=JSON.parse(fs.readFileSync(path.join(root,'luci/menu.d/luci-app-home-net.json')));
  for(const p of ['overview','updates','logs','vpn','settings'])assert(menu['admin/services/home-net/'+p]);
- for(const file of ['status','updates','logs','settings'])new Function('view','management',fs.readFileSync(path.join(root,'luci/view/home-net/'+file+'.js'),'utf8'))({extend:x=>x},common);\n const vpnSource=fs.readFileSync(path.join(root,'luci/view/home-net/vpn.js'),'utf8');\n new Function('view','fs','ui','rpc','management','E','window',vpnSource)({extend:x=>x},{exec:async()=>({code:0,stdout:'',stderr:''})},ui,rpc,common,E,{confirm:()=>true});
+ for(const file of ['status','updates','logs','settings'])new Function('view','management',fs.readFileSync(path.join(root,'luci/view/home-net/'+file+'.js'),'utf8'))({extend:x=>x},common);
+ const vpnSource=fs.readFileSync(path.join(root,'luci/view/home-net/vpn.js'),'utf8');
+ new Function('view','fs','ui','rpc','management','E','window',vpnSource)({extend:x=>x},{exec:async()=>({code:0,stdout:'',stderr:''})},ui,rpc,common,E,{confirm:()=>true});
  // Exercise the same UI actions in both languages; transport arguments stay English.
  for(const language of ['ru','ru-RU','en','de','']){
   const russian=/^ru/.test(language),localPolls=[],confirmations=[],notices=[];
