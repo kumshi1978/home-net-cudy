@@ -33,6 +33,7 @@ jobs:
           - home-net-vpn-manifest-validate
           - home-net-vpn-import
           - vpn-router
+          - vpn-identity
           - vpn-cudy-adapter
     steps:
       - uses: actions/checkout@v4
