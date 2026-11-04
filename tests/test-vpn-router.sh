@@ -137,6 +137,22 @@ echo awg_backup >"$tmp/config/active"
 reject promote
 run status | grep -qx "TRANSACTION_STATE='recovery-required'"
 test "$(cat "$tmp/config/active")" = awg_backup
+mv "$TEST_CONFIG/transaction" "$tmp/changed-active"
+printf 'plaintext fixture\n' >"$tmp/upload"
+reject prepare-upload candidate DE <"$tmp/upload"
+test ! -e "$TEST_CONFIG/transaction"
+{
+    printf 'age-encryption.org/v1\n'
+    dd if=/dev/zero bs=1024 count=65 2>/dev/null
+} >"$tmp/upload"
+reject prepare-upload candidate DE <"$tmp/upload"
+test ! -e "$TEST_CONFIG/transaction"
+printf 'age-encryption.org/v1\nsynthetic encrypted fixture\n' >"$tmp/upload"
+reject prepare-upload '../outside' DE <"$tmp/upload"
+run prepare-upload candidate DE <"$tmp/upload"
+test "$(cat "$TEST_CONFIG/transaction/deployment-id")" = candidate
+test "$(cat "$TEST_CONFIG/active")" = awg_backup
+test "$(sed -n '2p' "$TEST_CONFIG/transaction/metadata")" = awg_main
 test ! -e "$TEST_CONFIG/conflict"
 if [ -f "$TEST_CONFIG/WATCH.lock" ]; then
     for candidate in WATCH.lock LATE.lock HEALTH.lock; do
