@@ -12,7 +12,7 @@ fail() { printf '%s\n' 'VPN identity operation failed' >&2; exit 1; }
 
 case "$1" in
     initialize)
-        command -v age-keygen >/dev/null 2>&1 || fail
+        command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1 || fail
         [ ! -L /etc/home-net ] && [ ! -L "$keys" ] || fail
         mkdir -p "$keys" || fail
         chmod 0700 "$keys" || fail
@@ -36,9 +36,14 @@ case "$1" in
     status)
         status='NOT INITIALIZED'
         recipient=
-        if [ -e "$identity" ] || [ -L "$identity" ]; then
+        if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+            status=UNAVAILABLE
+        elif [ -e "$identity" ] || [ -L "$identity" ]; then
             status=ERROR
-            if [ -f "$identity" ] && [ ! -L "$identity" ] &&
+            if [ ! -L /etc/home-net ] && [ ! -L "$keys" ] &&
+                [ "$(stat -c %a "$keys" 2>/dev/null)" = 700 ] &&
+                [ -f "$identity" ] && [ ! -L "$identity" ] &&
+                [ "$(stat -c %a "$identity" 2>/dev/null)" = 600 ] &&
                 recipient=$(age-keygen -y "$identity" 2>/dev/null) &&
                 printf '%s\n' "$recipient" | grep -Eq '^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$' &&
                 [ -f "$public" ] && [ ! -L "$public" ] &&
