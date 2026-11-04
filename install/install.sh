@@ -42,7 +42,7 @@ for view in status updates logs vpn settings; do
     [ -f "$BASE_DIR/../luci/view/home-net/$view.js" ] || fail "missing LuCI view $view"
 done
 [ -f "$BASE_DIR/../luci/home-net/common.js" ] || fail "missing LuCI shared module"
-for component in router cudy-adapter manifest-validate bundle-verify; do
+for component in router cudy-adapter manifest-validate bundle-verify identity; do
     [ -f "$BASE_DIR/../scripts/home-net-vpn-$component" ] || fail "missing VPN component $component"
 done
 
@@ -98,6 +98,20 @@ done
 # Refuse an inconsistent baseline before changing any installed files.
 sh "$VERIFY_SRC" services
 sh "$VERIFY_SRC" health
+
+# Use the configured OpenWrt package feeds and their normal signature policy.
+if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+    if command -v apk >/dev/null 2>&1; then
+        apk add age || fail "cannot install age from the configured OpenWrt feeds"
+    elif command -v opkg >/dev/null 2>&1; then
+        opkg update && opkg install age || fail "cannot install age from the configured OpenWrt feeds"
+    else
+        fail "no supported package manager for age"
+    fi
+fi
+command -v age >/dev/null 2>&1 || fail "age is unavailable"
+sh "$BASE_DIR/../scripts/home-net-vpn-identity" initialize || fail "cannot initialize the router VPN identity"
+
 BEFORE_CHECK=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
 
 BACKUP_DIR="/root/backup-podkop-install"
@@ -117,6 +131,7 @@ for FILE in \
     /usr/bin/home-net-management \
     /usr/bin/home-net-podkop-update \
     /usr/bin/home-net-install-verify \
+    /usr/bin/home-net-vpn-identity \
     /usr/bin/home-net-vpn-router \
     /usr/bin/home-net-vpn-cudy-adapter \
     /usr/bin/home-net-vpn-manifest-validate \
@@ -166,7 +181,7 @@ install_executable "$MANAGEMENT_SRC" /usr/bin/home-net-management
 install_executable "$VERIFY_SRC" /usr/bin/home-net-install-verify
 install_executable "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
 # Ship the tools without activating an adapter or touching either VPN slot.
-for component in router cudy-adapter manifest-validate bundle-verify; do
+for component in router cudy-adapter manifest-validate bundle-verify identity; do
     install_executable "$BASE_DIR/../scripts/home-net-vpn-$component" "/usr/bin/home-net-vpn-$component"
 done
 sh /usr/bin/home-net-install-verify runtime
