@@ -5,6 +5,20 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/config" "$tmp/bundle"
 export TEST_CONFIG="$tmp/config"
+if [ -n "${HOME_NET_TEST_FAILOVER_INSTALLER:-}" ]; then
+    for section in WATCH LATE HEALTH; do
+        awk -v marker="EOF_$section" '
+            $0 == marker { exit }
+            inside { print }
+            index($0, "<<\047" marker "\047") { inside=1 }
+        ' "$HOME_NET_TEST_FAILOVER_INSTALLER" |
+            sed -n '/^maintenance_lock() {/,/^}/p' |
+            sed 's@/var/run/home-net-vpn-maintenance.lock@$TEST_MAINTENANCE@g' \
+            >"$TEST_CONFIG/$section.lock"
+        test -s "$TEST_CONFIG/$section.lock"
+    done
+fi
+
 export TEST_MAINTENANCE="$tmp/maintenance.lock"
 sed 's@^maintenance=/var/run/home-net-vpn-maintenance.lock$@maintenance=$TEST_MAINTENANCE@; s@^config=/etc/home-net/vpn$@config=$TEST_CONFIG@; /root required/d' \
     "$root/scripts/home-net-vpn-router" >"$tmp/router"
@@ -14,6 +28,17 @@ cat >"$tmp/config/adapter" <<'EOF'
 #!/bin/sh
 set -eu
 cd "$TEST_CONFIG"
+case "$1" in
+    stage|verify|promote|restore)
+        for candidate in WATCH.lock LATE.lock HEALTH.lock; do
+            [ -f "$candidate" ] || continue
+            if sh -c '. "./$1"; maintenance_lock' sh "$candidate" 9>&-; then
+                touch conflict
+                exit 1
+            fi
+        done
+        ;;
+esac
 case "$1" in
     active) cat active ;;
     validate) test -s "$3" ;;
@@ -112,4 +137,16 @@ echo awg_backup >"$tmp/config/active"
 reject promote
 run status | grep -qx "TRANSACTION_STATE='recovery-required'"
 test "$(cat "$tmp/config/active")" = awg_backup
+test ! -e "$TEST_CONFIG/conflict"
+if [ -f "$TEST_CONFIG/WATCH.lock" ]; then
+    for candidate in WATCH.lock LATE.lock HEALTH.lock; do
+        sh -c '. "$1"; maintenance_lock' sh "$TEST_CONFIG/$candidate"
+        (
+            . "$TEST_CONFIG/$candidate"
+            maintenance_lock
+            reject rollback
+        )
+    done
+    echo 'PASS: failover 1.4.2 and HOME NET share exclusive maintenance'
+fi
 echo 'PASS: router lifecycle, maintenance contention and reboot fencing'
