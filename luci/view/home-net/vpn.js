@@ -2,6 +2,9 @@
 'require view';
 'require fs';
 'require ui';
+'require rpc';
+
+var prepareUpload = rpc.declare({ object: 'home-net-vpn', method: 'prepare', params: ['deployment', 'country', 'ciphertext'] });
 'require home-net.common as management';
 
 function status() {
@@ -59,11 +62,39 @@ return view.extend({
             } }, label);
         }
 
+        var file = E('input', { type: 'file', accept: '.age' });
+        var deployment = E('input', { type: 'text', maxlength: '64', placeholder: _('Идентификатор deployment') });
+        var country = E('input', { type: 'text', maxlength: '2', placeholder: _('Код страны') });
+        var upload = E('button', { 'class': 'btn', click: function() {
+            var candidate = file.files[0];
+            if (!candidate || !candidate.size || candidate.size > 65536 ||
+                !/^[A-Za-z0-9._-]{1,64}$/.test(deployment.value) || !/^[A-Z]{2}$/.test(country.value)) {
+                report();
+                return;
+            }
+            if (!window.confirm(_('Загрузить зашифрованный профиль и подготовить неактивный слот?'))) return;
+            var id = deployment.value;
+            var expectedCountry = country.value;
+            upload.disabled = true;
+            return candidate.arrayBuffer().then(function(bytes) {
+                var binary = '';
+                var view = new Uint8Array(bytes);
+                for (var offset = 0; offset < view.length; offset += 4096)
+                    binary += String.fromCharCode.apply(null, view.subarray(offset, offset + 4096));
+                return prepareUpload(id, expectedCountry, btoa(binary));
+            }).then(function(result) {
+                if (!result || result.status !== 'prepared') throw new Error();
+                ui.addNotification(null, E('p', {}, _('Неактивный слот подготовлен')));
+                return refresh();
+            }).catch(report).then(function() { upload.disabled = false; file.value = ''; });
+        } }, _('Загрузить и подготовить'));
+
         return E('div', {}, [
             management.render('VPN', data[0]),
             E('section', { 'class': 'cbi-section' }, [
                 E('h3', {}, _('Secure VPN')),
                 info,
+                file, deployment, country, upload,
                 E('button', { 'class': 'btn', 'click': function() {
                     return refresh().catch(report);
                 } }, _('Проверить identity')),
