@@ -35,6 +35,24 @@ export MOCK_RPC_PAYLOADS="$TMP/rpc-payloads"
 export HOME_NET_UPDATE_CONF="$TMP/update.conf" HOME_NET_UPDATE_STATE_FILE="$TMP/root/etc/home-net-update.state"
 export HOME_NET_UPDATE_RUNTIME_DIR="$TMP/runtime" HOME_NET_UPDATE_LOCK_DIR="$TMP/lock"
 export HOME_NET_UPDATE_HEALTH_STATE="$HOME_NET_VERIFY_HEALTH" HOME_NET_UPDATE_BACKUP_ROOT="$TMP/backups"
+export HOME_NET_UPDATE_COORDINATION_MARKER="$TMP/home-net-update.in-progress"
+cat > "$TMP/bin/ip" <<'MOCK_IP'
+#!/bin/sh
+case "$*" in
+ '-4 route show default') echo 'default via 192.0.2.1 dev eth0' ;;
+ *rule*) echo '105: from all fwmark 0x100000/0x100000 lookup podkop' ;;
+ *route*) echo 'local default dev lo scope host' ;;
+ *) exit 1 ;;
+esac
+MOCK_IP
+cat > "$TMP/bin/uci" <<'MOCK_UCI'
+#!/bin/sh
+case "$*" in
+ '-q get podkop.main.interface') echo awg_backup ;;
+ *) echo /etc/sing-box/config.json ;;
+esac
+MOCK_UCI
+chmod 0755 "$TMP/bin/ip" "$TMP/bin/uci"
 export HOME_NET_UPDATE_BIN="$TMP/root/usr/bin/updater" HOME_NET_UPDATE_INIT="$TMP/root/etc/init.d/updater"
 export HOME_NET_UPDATE_STATE="$HOME_NET_UPDATE_STATE_FILE" HOME_NET_UPDATE_CONF="$TMP/update.conf"
 export HOME_NET_HEALTH_STATE="$HOME_NET_VERIFY_HEALTH" HOME_NET_UPDATER_BACKUP_ROOT="$TMP/backups"
