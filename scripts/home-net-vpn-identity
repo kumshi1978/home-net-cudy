@@ -5,10 +5,114 @@ umask 077
 keys=/etc/home-net/keys
 identity=$keys/age-identity.txt
 public=$keys/age-recipient.txt
+candidate=$keys/.rotation-candidate
+previous=$keys/.rotation-previous
 
 fail() { printf '%s\n' 'VPN identity operation failed' >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail
 [ "$#" = 1 ] || fail
+
+derive() {
+    age-keygen -y "$1" >"$2" 2>/dev/null || fail
+    [ "$(wc -l <"$2")" -eq 1 ] || fail
+    grep -Eq '^age1[023456789acdefghjklmnpqrstuvwxyz]{58}
+    initialize)
+        command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1 || fail
+        [ ! -L /etc/home-net ] && [ ! -L "$keys" ] || fail
+        mkdir -p "$keys" || fail
+        chmod 0700 "$keys" || fail
+        if command -v flock >/dev/null 2>&1; then rotation_lock; fi
+        tmp=$(mktemp -d "$keys/.identity.XXXXXX") || fail
+        trap 'rm -rf "$tmp"' EXIT
+        trap 'exit 1' HUP INT TERM
+        if [ ! -e "$identity" ] && [ ! -L "$identity" ]; then
+            age-keygen -o "$tmp/identity" >/dev/null 2>&1 || fail
+            chmod 0600 "$tmp/identity" || fail
+            # Publish the complete identity only if another process has not installed one.
+            ln "$tmp/identity" "$identity" 2>/dev/null || [ -f "$identity" ] || fail
+        fi
+        [ -f "$identity" ] && [ ! -L "$identity" ] || fail
+        chmod 0600 "$identity" || fail
+        derive "$identity" "$tmp/recipient"
+        [ ! -L "$public" ] && [ ! -d "$public" ] || fail
+        mv -f "$tmp/recipient" "$public" || fail
+        ;;
+    rotation-stage|rotation-promote|rotation-rollback)
+        command -v flock >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1 || fail
+        [ ! -L /etc/home-net ] && [ ! -L "$keys" ] || fail
+        [ "$(stat -c %a "$keys" 2>/dev/null)" = 700 ] || fail
+        rotation_lock
+        [ -f "$identity" ] && [ ! -L "$identity" ] || fail
+        [ "$(stat -c %a "$identity" 2>/dev/null)" = 600 ] || fail
+        [ ! -L "$public" ] && [ ! -d "$public" ] || fail
+        tmp=$(mktemp -d "$keys/.identity.XXXXXX") || fail
+        trap 'rm -rf "$tmp"' EXIT
+        trap 'exit 1' HUP INT TERM
+        case "$1" in
+            rotation-stage)
+                [ ! -e "$candidate" ] && [ ! -L "$candidate" ] || fail
+                age-keygen -o "$tmp/identity" >/dev/null 2>&1 || fail
+                chmod 0600 "$tmp/identity" || fail
+                derive "$tmp/identity" "$tmp/recipient"
+                mv "$tmp/identity" "$candidate" || fail
+                cat "$tmp/recipient"
+                ;;
+            rotation-promote)
+                [ -f "$candidate" ] && [ ! -L "$candidate" ] || fail
+                [ "$(stat -c %a "$candidate" 2>/dev/null)" = 600 ] || fail
+                [ ! -e "$previous" ] && [ ! -L "$previous" ] || fail
+                derive "$candidate" "$tmp/recipient"
+                ln "$identity" "$previous" || fail
+                mv -f "$candidate" "$identity" || fail
+                mv -f "$tmp/recipient" "$public" || fail
+                ;;
+            rotation-rollback)
+                [ -f "$previous" ] && [ ! -L "$previous" ] || fail
+                [ "$(stat -c %a "$previous" 2>/dev/null)" = 600 ] || fail
+                derive "$previous" "$tmp/recipient"
+                ln "$previous" "$tmp/identity" || fail
+                mv -f "$tmp/identity" "$identity" || fail
+                mv -f "$tmp/recipient" "$public" || fail
+                ;;
+        esac
+        ;;
+    status)
+        status='NOT INITIALIZED'
+        recipient=
+        if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+            status=UNAVAILABLE
+        elif [ -e "$identity" ] || [ -L "$identity" ]; then
+            status=ERROR
+            if [ ! -L /etc/home-net ] && [ ! -L "$keys" ] &&
+                [ "$(stat -c %a "$keys" 2>/dev/null)" = 700 ] &&
+                [ -f "$identity" ] && [ ! -L "$identity" ] &&
+                [ "$(stat -c %a "$identity" 2>/dev/null)" = 600 ] &&
+                recipient=$(age-keygen -y "$identity" 2>/dev/null) &&
+                printf '%s\n' "$recipient" | grep -Eq '^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$' &&
+                [ -f "$public" ] && [ ! -L "$public" ] &&
+                [ "$(cat "$public")" = "$recipient" ]; then
+                status=READY
+            fi
+        fi
+        router=
+        if [ -f /etc/home-net/vpn/router-id ] && [ ! -L /etc/home-net/vpn/router-id ]; then
+            router=$(cat /etc/home-net/vpn/router-id)
+        fi
+        case "$router" in apartment-main|apartment-backup|dacha-main|dacha-backup) ;; *) router= ;; esac
+        [ "$status" = READY ] || recipient=
+        printf "ROUTER_ID='%s'\nIDENTITY_STATUS='%s'\nPUBLIC_RECIPIENT='%s'\n" "$router" "$status" "$recipient"
+        ;;
+    *) fail ;;
+esac
+ "$2" || fail
+}
+
+rotation_lock() {
+    [ ! -L "$keys/.rotation-lock" ] || fail
+    [ ! -e "$keys/.rotation-lock" ] || [ -f "$keys/.rotation-lock" ] || fail
+    exec 8>>"$keys/.rotation-lock"
+    flock -x 8 || fail
+}
 
 case "$1" in
     initialize)
