@@ -42,6 +42,9 @@ for view in status updates logs vpn settings; do
     [ -f "$BASE_DIR/../luci/view/home-net/$view.js" ] || fail "missing LuCI view $view"
 done
 [ -f "$BASE_DIR/../luci/home-net/common.js" ] || fail "missing LuCI shared module"
+for component in router cudy-adapter manifest-validate bundle-verify; do
+    [ -f "$BASE_DIR/../scripts/home-net-vpn-$component" ] || fail "missing VPN component $component"
+done
 
 check_file() {
     [ -f "$1" ] || fail "missing file $1"
@@ -114,6 +117,10 @@ for FILE in \
     /usr/bin/home-net-management \
     /usr/bin/home-net-podkop-update \
     /usr/bin/home-net-install-verify \
+    /usr/bin/home-net-vpn-router \
+    /usr/bin/home-net-vpn-cudy-adapter \
+    /usr/bin/home-net-vpn-manifest-validate \
+    /usr/bin/home-net-vpn-bundle-verify \
     /www/luci-static/resources/home-net/common.js \
     /www/luci-static/resources/view/home-net/updates.js \
     /www/luci-static/resources/view/home-net/logs.js \
@@ -158,6 +165,10 @@ install_executable "$CONTROL_SRC" /usr/bin/home-net-control
 install_executable "$MANAGEMENT_SRC" /usr/bin/home-net-management
 install_executable "$VERIFY_SRC" /usr/bin/home-net-install-verify
 install_executable "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
+# Ship the tools without activating an adapter or touching either VPN slot.
+for component in router cudy-adapter manifest-validate bundle-verify; do
+    install_executable "$BASE_DIR/../scripts/home-net-vpn-$component" "/usr/bin/home-net-vpn-$component"
+done
 sh /usr/bin/home-net-install-verify runtime
 mkdir -p /www/luci-static/resources/home-net
 install_luci_file "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
