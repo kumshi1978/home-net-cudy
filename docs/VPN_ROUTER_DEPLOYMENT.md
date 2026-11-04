@@ -1,6 +1,6 @@
 # Router VPN deployment transaction
 
-Install the router helper and manifest validator side by side for lab use. This PR provides the transaction runner and a test adapter. A Cudy adapter for the actual netifd, AmneziaWG, Failover and Podkop configuration is required before hardware use. The helper refuses to operate without the adapter.
+Install the router helper and manifest validator side by side for lab use. This PR includes a runtime Cudy adapter for pre-provisioned AWG slots. See [Cudy lab adapter](VPN_CUDY_CANARY.md) for installation, maintenance-window prerequisites and hardware acceptance. The helper refuses to operate without an installed adapter.
 
 Use a root-owned, mode 0700 /etc/home-net/vpn directory. Provision router-id, a mode 0600 age-identity.txt for this router, and an executable adapter. The NAS encrypts each payload for this router, NAS and offline recovery. Only the router's payload is decrypted in a private /tmp directory. The persistent backup may contain VPN secrets. Keep it on the router and out of Git.
 

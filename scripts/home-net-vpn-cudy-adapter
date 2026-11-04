@@ -1,0 +1,175 @@
+#!/bin/sh
+# Explicit lab adapter for already provisioned AmneziaWG interfaces.
+set -eu
+umask 077
+
+config=/etc/home-net/vpn
+backup=$config/transaction/backup
+verb=$1
+shift
+
+slot() {
+    case "$1" in awg_main|awg_backup) ;; *) return 1 ;; esac
+}
+
+quiescent() {
+    # These services can rewrite Podkop or restart it outside our transaction.
+    for writer in podkop-awg-failover podkop-health podkop-late-start; do
+        init=/etc/init.d/$writer
+        if [ -x "$init" ] && "$init" enabled; then return 1; fi
+        status=$(ubus call service list "{\"name\":\"$writer\"}") || return 1
+        case "$status" in *\""$writer"\"*) return 1 ;; esac
+        if pidof "$writer" >/dev/null 2>&1; then return 1; fi
+    done
+}
+
+section=$(cat "$config/podkop-section")
+case "$section" in ''|*[!A-Za-z0-9_]*) exit 1 ;; esac
+option=podkop.$section.interface
+
+active() {
+    [ "$(uci -q get "podkop.$section.connection_type")" = vpn ] || return 1
+    selected=$(uci -q get "$option") || return 1
+    slot "$selected" || return 1
+    printf '%s\n' "$selected"
+}
+
+validate() {
+    # A single-peer awg syncconf file. IP addresses and routing stay with netifd.
+    awk '
+        /^[[:space:]]*($|#)/ { next }
+        /^[[:space:]]*\[Interface\][[:space:]]*$/ && section == 0 { section=1; next }
+        /^[[:space:]]*\[Peer\][[:space:]]*$/ && section == 1 { section=2; next }
+        {
+            pos=index($0,"=")
+            if (!pos) exit 1
+            key=substr($0,1,pos-1)
+            value=substr($0,pos+1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            if (value == "" || seen[key]++) exit 1
+            if (section == 1 && key ~ /^(PrivateKey|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5])$/) next
+            if (section == 2 && key ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive)$/) next
+            exit 1
+        }
+        END {
+            if (section != 2 || !seen["PrivateKey"] || !seen["PublicKey"] ||
+                !seen["AllowedIPs"] || !seen["Endpoint"]) exit 1
+        }
+    ' "$1"
+}
+
+hash_conf() {
+    [ -n "$1" ] || return 1
+    printf '%s\n' "$1" | sha256sum | cut -d ' ' -f 1
+}
+
+fingerprint() {
+    # Capture command failure before hashing. Never print showconf.
+    conf=$(awg showconf "$1") || return 1
+    hash_conf "$conf"
+}
+
+healthy() {
+    /etc/init.d/podkop running &&
+        pidof sing-box >/dev/null &&
+        timeout 10 nslookup github.com 127.0.0.1 >/dev/null
+}
+
+probe() {
+    ip=$(curl -q -4 --noproxy '*' --interface "if!$1" --connect-timeout 5 \
+        --max-time 10 --max-filesize 128 -fsS https://ifconfig.me/ip) || return 1
+    printf '%s\n' "$ip" | awk -F . '
+        NF != 4 { bad=1 }
+        { for (i=1; i<=NF; i++) if ($i !~ /^[0-9]+$/ || $i > 255) bad=1 }
+        END { exit (NR != 1 || bad) }
+    ' || return 1
+    handshake=$(awg show "$1" latest-handshakes) || return 1
+    now=$(date +%s) || return 1
+    since=0
+    if [ -n "$2" ]; then since=$(cat "$backup/staged-at") || return 1; fi
+    printf '%s\n' "$handshake" | awk -v now="$now" -v since="$since" '
+        NF != 2 || $2 !~ /^[0-9]+$/ || $2 <= since || $2 > now || now-$2 > 180 { bad=1 }
+        END { exit (NR != 1 || bad) }
+    ' || return 1
+    if [ -n "$2" ]; then
+        country=$(curl -q -4 --noproxy '*' --interface "if!$1" --connect-timeout 5 \
+            --max-time 10 --max-filesize 128 -fsS https://ipinfo.io/country) || return 1
+        [ "$country" = "$2" ] || return 1
+    fi
+}
+
+switch_to() {
+    # Match Failover's runtime UCI behavior. Persisting this is a later operation.
+    uci set "$option=$1" &&
+        timeout 45 /etc/init.d/podkop restart
+}
+
+matches_candidate() {
+    [ "$(fingerprint "$1")" = "$(cat "$backup/candidate.sha256")" ] &&
+        [ -s "$backup/candidate.sha256" ]
+}
+
+quiescent
+case "$verb:$#" in
+    active:0) active ;;
+    validate:2) slot "$1"; validate "$2" ;;
+    snapshot:3)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        healthy
+        awg showconf "$2" >"$3/target.conf"
+        [ -s "$3/target.conf" ]
+        conf=$(cat "$3/target.conf")
+        hash_conf "$conf" >"$3/baseline.sha256"
+        ;;
+    stage:3)
+        slot "$1"; slot "$2"
+        [ "$1" != "$2" ] && [ "$(active)" = "$1" ] || exit 1
+        validate "$3"
+        [ "$(fingerprint "$2")" = "$(cat "$backup/baseline.sha256")" ]
+        date +%s >"$backup/staged-at"
+        awg syncconf "$2" "$3"
+        fingerprint "$2" >"$backup/candidate.sha256"
+        ;;
+    verify:3)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        matches_candidate "$2"
+        probe "$2" "$3"
+        healthy
+        ;;
+    promote:2)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        matches_candidate "$2"
+        : >"$backup/promotion-started"
+        switch_to "$2"
+        ;;
+    check-promoted:2)
+        slot "$1"
+        [ "$(active)" = "$1" ]
+        matches_candidate "$1"
+        probe "$1" "$2"
+        healthy
+        ;;
+    restore:3)
+        slot "$1"; slot "$2"
+        [ "$1" != "$2" ]
+        selected=$(active)
+        # A failed restart can leave the UCI selection ahead of the daemon.
+        if [ "$selected" != "$1" ] || [ -f "$3/promotion-started" ]; then
+            switch_to "$1"
+        fi
+        [ "$(active)" = "$1" ]
+        awg syncconf "$2" "$3/target.conf"
+        ;;
+    check-restored:3)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        [ "$(fingerprint "$2")" = "$(cat "$3/baseline.sha256")" ]
+        probe "$1" ""
+        healthy
+        ;;
+    *) exit 1 ;;
+esac
