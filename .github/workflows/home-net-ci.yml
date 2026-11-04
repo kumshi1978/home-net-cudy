@@ -46,6 +46,13 @@ jobs:
           sh -n install-all.sh
           sh -n install/install.sh
           sh -n "tests/test-${{ matrix.suite }}.sh"
+      - name: Fetch pinned failover coordination fixture
+        if: matrix.suite == 'vpn-router'
+        run: |
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/kumshi1978/openwrt-podkop-awg-failover/a17eea697601368ec2dcd55585dd6c40ed56c586/install.sh \
+            -o "$RUNNER_TEMP/failover-install.sh"
+          printf 'HOME_NET_TEST_FAILOVER_INSTALLER=%s/failover-install.sh\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Offline regression tests
         run: sh "tests/test-${{ matrix.suite }}.sh"
       - name: Whitespace validation
