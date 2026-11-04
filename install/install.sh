@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.7.4
+# Version: 1.8.0
 
 set -e
 
@@ -273,6 +273,6 @@ fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
-echo "HOME NET Podkop Monitor v1.7.4 installed"
+echo "HOME NET Podkop Monitor v1.8.0 installed"
 echo "LuCI page: Services -> HOME NET"
 echo "Domain capture remains disabled until explicitly enabled."
