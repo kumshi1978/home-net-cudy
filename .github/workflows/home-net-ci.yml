@@ -30,6 +30,10 @@ jobs:
           - candidate-packaging
           - release-packaging
           - component-update-policy
+          - home-net-vpn-manifest-validate
+          - home-net-vpn-import
+          - vpn-router
+          - vpn-cudy-adapter
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,6 +43,7 @@ jobs:
         run: |
           sh -n scripts/home-net-update
           sh -n install-all.sh
+          sh -n install/install.sh
           sh -n "tests/test-${{ matrix.suite }}.sh"
       - name: Offline regression tests
         run: sh "tests/test-${{ matrix.suite }}.sh"
