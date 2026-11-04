@@ -2,7 +2,7 @@ const fs=require('fs'),assert=require('assert'),path=require('path');
 const root=path.resolve(__dirname,'..');
 const calls=[],polls=[];let releaseClass='SAFE',modal,workerStatus='NONE',installed='1.6.0',podkopWorkerStatus='NONE',podkopVersion='0.7.22';
 function E(tag,attrs,children){return {tag,attrs:attrs || {},children:Array.isArray(children)?children:[children],disabled:attrs && attrs.disabled,value:attrs && attrs.value || (tag==='select' && children[0].attrs.value),checked:attrs && attrs.checked,replaceChildren(...c){this.children=c},appendChild(c){this.children.push(c)},addEventListener(name,fn){this.attrs[name]=fn}}}
-const rpc={exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-latest')workerStatus='RUNNING';if(args[0]==='podkop-update')podkopWorkerStatus='RUNNING';const output={
+const rpc={declare:spec=>async(...args)=>{calls.push({rpc:spec,args});return {status:'prepared'}},exec:async(bin,args)=>{calls.push({bin,args});if(args[0]==='install-latest')workerStatus='RUNNING';if(args[0]==='podkop-update')podkopWorkerStatus='RUNNING';const output={
  preview:'TARGET=v1.7.0\nCLASS='+releaseClass+'\n',
  'install-status':'STATUS='+workerStatus+'\nTARGET=v1.7.0\n',
  'podkop-status':'STATUS='+podkopWorkerStatus+'\nTARGET=0.7.24\nCURRENT_VERSION='+podkopVersion+'\n',
