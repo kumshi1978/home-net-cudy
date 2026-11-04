@@ -1,27 +1,94 @@
 # Router VPN deployment transaction
 
-Install the router helper and manifest validator side by side for lab use. This PR includes a runtime Cudy adapter for pre-provisioned AWG slots. See [Cudy lab adapter](VPN_CUDY_CANARY.md) for installation, maintenance-window prerequisites and hardware acceptance. The helper refuses to operate without an installed adapter.
+## Назначение
 
-Use a root-owned, mode 0700 /etc/home-net/vpn directory. Provision router-id, a mode 0600 age-identity.txt for this router, and an executable adapter. The NAS encrypts each payload for this router, NAS and offline recovery. Only the router's payload is decrypted in a private /tmp directory. The persistent backup may contain VPN secrets. Keep it on the router and out of Git.
+HOME NET v1.8.0 выполняет secure VPN deployment локально на Cudy.
+
+Router helper работает только с заранее существующими слотами `awg_main` и `awg_backup` и не требует NAS.
+
+Identity хранится локально:
+
+```
+/etc/home-net/keys/age-identity.txt
+```
+
+mode 0600, каталог `/etc/home-net/keys` — mode 0700.
 
 ## Adapter contract
 
-All verbs run synchronously and return nonzero on failure. Only active writes to stdout. The adapter must coordinate with other network writers, including Failover, and fail closed if it cannot guarantee isolation.
+Все verbs синхронные и возвращают nonzero при ошибке. Только `active` пишет slot в stdout.
 
-| Verb and arguments | Required behavior |
+| Verb | Поведение |
 | --- | --- |
-| active | Print exactly awg_main or awg_backup |
-| validate TARGET PLAINTEXT | Parse and validate the complete AWG config, reject hooks and unsupported directives, and make no network changes |
-| snapshot PREVIOUS TARGET BACKUP_DIR | Capture restorable target config and previous routing policy in the private backup directory |
-| stage PREVIOUS TARGET PLAINTEXT | Recheck active slot, apply only the candidate with isolated routing and no default-route or Podkop changes |
-| verify PREVIOUS TARGET COUNTRY | Verify the staged configuration has not drifted, a fresh candidate handshake and interface-bound HTTPS/egress/country checks pass, and Podkop/sing-box are healthy |
-| promote PREVIOUS TARGET | Switch traffic to the verified target, preserving the previous slot and checking for drift before changing policy |
-| check-promoted TARGET COUNTRY | Verify active routing, handshake, HTTPS/egress/country and Podkop/sing-box health |
-| restore PREVIOUS TARGET BACKUP_DIR | Idempotently restore previous traffic and the target's baseline config, even after partial stage or promotion |
-| check-restored PREVIOUS TARGET BACKUP_DIR | Confirm previous traffic health and restored target config |
+| active | вывести `awg_main` или `awg_backup` |
+| validate TARGET PLAINTEXT | проверить AWG config без изменения сети |
+| snapshot PREVIOUS TARGET BACKUP_DIR | сохранить rollback material |
+| stage PREVIOUS TARGET PLAINTEXT | применить candidate только в inactive slot |
+| verify PREVIOUS TARGET COUNTRY | проверить candidate, handshake, egress, country и Podkop/sing-box health |
+| promote PREVIOUS TARGET | переключить policy на candidate |
+| check-promoted TARGET COUNTRY | проверить promoted state |
+| restore PREVIOUS TARGET BACKUP_DIR | восстановить предыдущую рабочую конфигурацию |
+| check-restored PREVIOUS TARGET BACKUP_DIR | подтвердить rollback |
+
+## Maintenance coordination
+
+HOME NET и Failover 1.4.2 используют один kernel lock:
+
+```
+/var/run/home-net-vpn-maintenance.lock
+```
+
+Каждая critical operation берёт `flock`, повторно читает actual active slot и только после этого выполняет write.
+
+Lock не удерживается между отдельными ручными этапами Prepare и Promote.
+
+Если active slot изменился между Prepare и Promote, Promote завершается fail-safe и transaction переходит в recovery-required/error state.
+
+Наличие lock-файла без удерживаемого `flock` не считается активной maintenance operation.
 
 ## Operator flow
 
-Take SHA256 of SHA256SUMS from an independently authenticated immutable Git commit. Pass the digest to `home-net-vpn-router prepare BUNDLE DIGEST`. The helper verifies the manifest and selected ciphertext, then checks the manifest slot is inactive. Run `verify` before explicit `promote`. Promotion repeats verification and attempts rollback on failed promotion or failed post-check. Run `rollback` to restore from the persistent record.
+### Legacy upgrade
 
-One transaction is retained for recovery. After a successful rollback, archive the root-only transaction directory outside Git before starting another. An interrupted operation can leave a lock. Confirm no operation remains in flight before removing the stale lock and running rollback. Inspect the backup and phase locally. No boot-time recovery, automatic promotion, installer wiring or rollout is enabled by this PR.
+Обычный HOME NET upgrade:
+
+- не требует `age`;
+- не создаёт identity;
+- не меняет active VPN;
+- не мигрирует secrets автоматически.
+
+### Secure flow
+
+1. Initialize local identity.
+2. Upload encrypted `.conf.age`.
+3. Prepare inactive slot.
+4. Verify candidate.
+5. Explicit Promote.
+6. Rollback при необходимости.
+
+Backend upload ограничен 64 KiB и не использует user-supplied filename.
+
+## Reboot/session safety
+
+Browser/LuCI session не является владельцем transaction.
+
+После reboot:
+
+- автоматический Promote запрещён;
+- незавершённая transaction определяется по persisted state/boot-id;
+- оператор получает recovery-required и выполняет явный Rollback/recovery.
+
+## Rotation
+
+Identity rotation выполняется вручную через candidate key:
+
+1. stage;
+2. verify public recipient;
+3. explicit promote;
+4. rollback при необходимости.
+
+Предыдущий key сохраняется как local recovery material и не удаляется автоматически.
+
+## Deferred
+
+NAS controller, central key distribution и OpenWrt 24/25 VM Lab не входят в обязательный scope v1.8.0.
