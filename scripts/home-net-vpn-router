@@ -6,14 +6,32 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "root required"
 action=${1:-}
 case "$action:$#" in
-    prepare:3|verify:1|promote:1|rollback:1) ;;
-    *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | verify | promote | rollback" ;;
+    prepare:3|verify:1|promote:1|rollback:1|status:1) ;;
+    *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | verify | promote | rollback | status" ;;
 esac
 
 base=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 config=/etc/home-net/vpn
 state=$config/transaction
 adapter=$config/adapter
+boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || fail "boot identifier unavailable"
+
+if [ "$action" = status ]; then
+    current=idle
+    if [ -f "$state/phase" ]; then
+        current=$(cat "$state/phase")
+        case "$current" in preparing|prepared|verified|promoting|promoted|restoring|rolled-back) ;;
+            *) current=recovery-required ;;
+        esac
+        if [ "$(cat "$state/boot-id" 2>/dev/null || true)" != "$boot_id" ] &&
+            [ "$current" != rolled-back ]; then
+            current=recovery-required
+        fi
+    fi
+    printf "TRANSACTION_STATE='%s'\n" "$current"
+    if [ -d "$config/lock" ]; then printf '%s\n' "TRANSACTION_LOCK='present'"; fi
+    exit 0
+fi
 [ -x "$adapter" ] || fail "router adapter required"
 mkdir "$config/lock" || fail "locked or interrupted operation"
 tmp=
@@ -87,6 +105,7 @@ if [ "$action" = prepare ]; then
     mkdir "$record/backup"
     run_adapter snapshot "$previous" "$slot" "$record/backup" || fail "backup failed"
     printf '%s\n' "$previous" "$slot" "$country" >"$record/metadata"
+    printf '%s\n' "$boot_id" >"$record/boot-id"
     printf '%s\n' preparing >"$record/phase"
     mv "$record" "$state"
     record=
@@ -104,6 +123,10 @@ fi
 
 [ -f "$state/phase" ] || fail "transaction missing"
 current=$(cat "$state/phase")
+if [ "$action" != rollback ]; then
+    [ "$(cat "$state/boot-id" 2>/dev/null || true)" = "$boot_id" ] ||
+        fail "transaction belongs to an earlier boot; recovery required"
+fi
 {
     read -r previous
     read -r slot
