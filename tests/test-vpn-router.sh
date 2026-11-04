@@ -85,4 +85,20 @@ run rollback
 run rollback
 test "$(cat "$tmp/config/active")" = awg_main
 test "$(cat "$tmp/config/candidate")" = baseline
-echo 'PASS: router deployment lifecycle'
+mv "$tmp/config/transaction" "$tmp/completed"
+run status | grep -qx "TRANSACTION_STATE='idle'"
+run prepare "$tmp/bundle" "$digest"
+run verify
+printf '%s\n' previous-boot >"$tmp/config/transaction/boot-id"
+run status | grep -qx "TRANSACTION_STATE='recovery-required'"
+reject verify
+reject promote
+test "$(cat "$tmp/config/active")" = awg_main
+mkdir "$tmp/config/lock"
+run status | grep -qx "TRANSACTION_LOCK='present'"
+reject rollback
+rmdir "$tmp/config/lock"
+run rollback
+test "$(cat "$tmp/config/active")" = awg_main
+run status | grep -qx "TRANSACTION_STATE='rolled-back'"
+echo 'PASS: router deployment lifecycle and reboot fencing'
