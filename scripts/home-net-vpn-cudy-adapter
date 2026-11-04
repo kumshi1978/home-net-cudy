@@ -102,7 +102,7 @@ probe() {
 switch_to() {
     # Match Failover's runtime UCI behavior. Persisting this is a later operation.
     uci set "$option=$1" &&
-        timeout 45 /etc/init.d/podkop restart
+        timeout 45 /etc/init.d/podkop restart 9>&-
 }
 
 matches_candidate() {
