@@ -3,9 +3,9 @@
 'require fs';
 'require ui';
 'require rpc';
+'require home-net.common as management';
 
 var prepareUpload = rpc.declare({ object: 'home-net-vpn', method: 'prepare', params: ['deployment', 'country', 'ciphertext'] });
-'require home-net.common as management';
 
 function status() {
     return fs.exec('/usr/bin/home-net-status', ['vpn-secure']).then(function(result) {
@@ -95,6 +95,9 @@ return view.extend({
                 E('h3', {}, _('Secure VPN')),
                 info,
                 file, deployment, country, upload,
+                rotationButton(_('Проверить профиль'), 'vpn-verify', _('Проверить подготовленный профиль?')),
+                rotationButton(_('Переключить VPN'), 'vpn-promote', _('Переключить трафик на проверенный слот?')),
+                rotationButton(_('Откатить VPN'), 'vpn-rollback', _('Восстановить предыдущий VPN и сохранённую конфигурацию?')),
                 E('button', { 'class': 'btn', 'click': function() {
                     return refresh().catch(report);
                 } }, _('Проверить identity')),
