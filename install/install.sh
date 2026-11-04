@@ -99,18 +99,12 @@ done
 sh "$VERIFY_SRC" services
 sh "$VERIFY_SRC" health
 
-# Use the configured OpenWrt package feeds and their normal signature policy.
-if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
-    if command -v apk >/dev/null 2>&1; then
-        apk add age || fail "cannot install age from the configured OpenWrt feeds"
-    elif command -v opkg >/dev/null 2>&1; then
-        opkg update && opkg install age || fail "cannot install age from the configured OpenWrt feeds"
-    else
-        fail "no supported package manager for age"
-    fi
+# Secure deployment is optional and is initialized explicitly after upgrade.
+if command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1; then
+    printf '%s\n' 'VPN crypto tools available'
+else
+    printf '%s\n' 'VPN crypto tools unavailable; Legacy VPN remains available'
 fi
-command -v age >/dev/null 2>&1 || fail "age is unavailable"
-sh "$BASE_DIR/../scripts/home-net-vpn-identity" initialize || fail "cannot initialize the router VPN identity"
 
 BEFORE_CHECK=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
 
