@@ -6,7 +6,7 @@ set -eu
 
 REPO="kumshi1978/home-net-cudy"
 RELEASE_REF="${HOME_NET_RELEASE_REF:-v1.8.0}"
-TMP_DIR="/tmp/home-net-cudy-install.$$"
+TMP_DIR="$(mktemp -d /tmp/home-net-cudy-install.XXXXXX)" || exit 1
 ARCHIVE="$TMP_DIR/release.tar.gz"
 SRC_DIR="$TMP_DIR/src"
 URL="https://github.com/$REPO/archive/$RELEASE_REF.tar.gz"
