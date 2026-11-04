@@ -125,6 +125,7 @@ for FILE in \
     /usr/bin/home-net-management \
     /usr/bin/home-net-podkop-update \
     /usr/bin/home-net-install-verify \
+    /usr/libexec/rpcd/home-net-vpn \
     /usr/bin/home-net-vpn-identity \
     /usr/bin/home-net-vpn-router \
     /usr/bin/home-net-vpn-cudy-adapter \
@@ -178,6 +179,8 @@ install_executable "$PODKOP_UPDATE_SRC" /usr/bin/home-net-podkop-update
 for component in router cudy-adapter manifest-validate bundle-verify identity; do
     install_executable "$BASE_DIR/../scripts/home-net-vpn-$component" "/usr/bin/home-net-vpn-$component"
 done
+mkdir -p /usr/libexec/rpcd
+install_executable "$BASE_DIR/../luci/rpcd/home-net-vpn" /usr/libexec/rpcd/home-net-vpn
 sh /usr/bin/home-net-install-verify runtime
 mkdir -p /www/luci-static/resources/home-net
 install_luci_file "$BASE_DIR/../luci/home-net/common.js" /www/luci-static/resources/home-net/common.js
