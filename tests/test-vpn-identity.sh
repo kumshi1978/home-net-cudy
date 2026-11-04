@@ -10,8 +10,14 @@ sed 's@/etc/home-net@$TEST_HOME_NET@g; /id -u/d' \
 cat >"$tmp/bin/age-keygen" <<'EOF'
 #!/bin/sh
 case "$1" in
-    -o) [ ! -e "$2" ] && printf '%s\n' 'private fixture' >"$2" ;;
-    -y) grep -qx 'private fixture' "$2" && printf 'age1%058d\n' 0 ;;
+    -o) [ ! -e "$2" ] && printf 'private fixture %s\n' "${TEST_GENERATION:-0}" >"$2" ;;
+    -y)
+        case "$(cat "$2")" in
+            'private fixture 0') printf 'age1%058d\n' 0 ;;
+            'private fixture 2') printf 'age1%058d\n' 2 ;;
+            *) exit 1 ;;
+        esac
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -60,4 +66,16 @@ sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='READY'"
 set -- "$TEST_HOME_NET/keys"/.identity.*
 [ ! -e "$1" ]
 if sh "$tmp/identity" regenerate; then exit 1; fi
+old=$(sha256sum "$key")
+old_public=$(cat "$recipient")
+if sh "$tmp/identity" rotation-promote; then exit 1; fi
+candidate=$(TEST_GENERATION=2 sh "$tmp/identity" rotation-stage)
+[ "$candidate" != "$old_public" ]
+[ "$(sha256sum "$key")" = "$old" ]
+sh "$tmp/identity" rotation-promote
+[ "$(cat "$recipient")" = "$candidate" ]
+[ "$(sha256sum "$key")" != "$old" ]
+sh "$tmp/identity" rotation-rollback
+[ "$(sha256sum "$key")" = "$old" ]
+[ "$(cat "$recipient")" = "$old_public" ]
 printf '%s\n' 'VPN identity regression passed'
