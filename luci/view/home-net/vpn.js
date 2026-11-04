@@ -21,8 +21,11 @@ function showStatus(container, values) {
     }
     container.replaceChildren(
         row(_('Router ID'), 'ROUTER_ID'),
+        row(_('Поддержка криптографии'), 'CRYPTO_SUPPORT'),
         row(_('Криптографическая identity'), 'IDENTITY_STATUS'),
         row(_('Публичный recipient'), 'PUBLIC_RECIPIENT'),
+        row(_('Режим VPN'), 'VPN_MODE'),
+        row(_('Secure migration доступна'), 'MIGRATION_AVAILABLE'),
         row(_('Транзакция'), 'TRANSACTION_STATE'),
         row(_('Блокировка'), 'TRANSACTION_LOCK')
     );
