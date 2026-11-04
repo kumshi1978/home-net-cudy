@@ -15,7 +15,8 @@ case "$1" in
     *) exit 1 ;;
 esac
 EOF
-chmod +x "$tmp/bin/age-keygen"
+printf '%s\n' '#!/bin/sh' 'exit 1' >"$tmp/bin/age"
+chmod +x "$tmp/bin/age-keygen" "$tmp/bin/age"
 PATH="$tmp/bin:$PATH"
 export PATH
 sh "$tmp/identity" status | grep -q "IDENTITY_STATUS='NOT INITIALIZED'"
@@ -30,5 +31,33 @@ status=$(sh "$tmp/identity" status)
 printf '%s\n' "$status" | grep -qx "IDENTITY_STATUS='READY'"
 printf '%s\n' "$status" | grep -q "^PUBLIC_RECIPIENT='age1"
 case "$status" in *'private fixture'*) exit 1 ;; esac
+recipient="$TEST_HOME_NET/keys/age-recipient.txt"
+chmod 0644 "$key"
+sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='ERROR'"
+sh "$tmp/identity" initialize
+rm "$recipient"
+sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='ERROR'"
+sh "$tmp/identity" initialize
+printf '%s\n' mismatch >"$recipient"
+sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='ERROR'"
+sh "$tmp/identity" initialize
+mv "$key" "$tmp/saved"
+ln -s "$tmp/saved" "$key"
+if sh "$tmp/identity" initialize; then exit 1; fi
+sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='ERROR'"
+rm "$key"
+printf '%s\n' corrupt >"$key"
+if sh "$tmp/identity" initialize; then exit 1; fi
+grep -qx corrupt "$key"
+rm "$key"
+sh "$tmp/identity" initialize &
+first=$!
+sh "$tmp/identity" initialize &
+second=$!
+wait "$first"
+wait "$second"
+sh "$tmp/identity" status | grep -qx "IDENTITY_STATUS='READY'"
+set -- "$TEST_HOME_NET/keys"/.identity.*
+[ ! -e "$1" ]
 if sh "$tmp/identity" regenerate; then exit 1; fi
 printf '%s\n' 'VPN identity regression passed'
