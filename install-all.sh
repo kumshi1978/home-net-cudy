@@ -3,7 +3,7 @@ set -eu
 
 BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.8.0}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
-TMP_DIR="/tmp/home-net-bundle.$$"
+TMP_DIR="$(mktemp -d /tmp/home-net-bundle.XXXXXX)" || exit 1
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
 FAILOVER_INSTALL="$TMP_DIR/failover-install.sh"
 MONITORING_INSTALL="$TMP_DIR/monitoring-install.sh"
