@@ -40,6 +40,25 @@ return view.extend({
         if (data[1]) showStatus(info, data[1]);
         else info.textContent = _('Состояние secure VPN недоступно');
 
+        function rotationButton(label, action, warning) {
+            return E('button', { 'class': 'btn', 'click': function(event) {
+                if (!window.confirm(warning)) return;
+                var button = event.currentTarget;
+                button.disabled = true;
+                return fs.exec('/usr/bin/home-net-management', [action])
+                    .then(function(result) {
+                        if (result.code) throw new Error();
+                        if (action === 'vpn-rotation-stage') {
+                            var recipient = String(result.stdout || '').trim();
+                            if (!/^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$/.test(recipient))
+                                throw new Error();
+                            ui.addNotification(null, E('p', {}, [_('Публичный recipient кандидата'), ' ', recipient]));
+                        }
+                        return refresh();
+                    }).catch(report).then(function() { button.disabled = false; });
+            } }, label);
+        }
+
         return E('div', {}, [
             management.render('VPN', data[0]),
             E('section', { 'class': 'cbi-section' }, [
@@ -57,7 +76,13 @@ return view.extend({
                             if (result.code) throw new Error();
                             return refresh();
                         }).catch(report).then(function() { button.disabled = false; });
-                } }, _('Инициализировать хранилище'))
+                } }, _('Инициализировать хранилище')),
+                rotationButton(_('Создать ключ-кандидат'), 'vpn-rotation-stage',
+                    _('Создать новый локальный ключ? Текущий ключ продолжит работать.')),
+                rotationButton(_('Применить новый ключ'), 'vpn-rotation-promote',
+                    _('Заменить текущий ключ? Старые .conf.age могут требовать прежний ключ. Его резервная копия останется на роутере.')),
+                rotationButton(_('Вернуть прежний ключ'), 'vpn-rotation-rollback',
+                    _('Восстановить прежний ключ? Для пакетов, зашифрованных на новый recipient, потребуется повторное шифрование.'))
             ])
         ]);
     },
