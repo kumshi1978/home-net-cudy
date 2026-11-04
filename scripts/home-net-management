@@ -187,6 +187,10 @@ podkop_log() {
     tail -n 200 "$(cat "$CACHE/podkop-job")/output.log"
 }
 case "${1:-}" in
+    vpn-initialize)
+        [ "$#" -eq 1 ] || fail 'invalid VPN initialization request'
+        exec /usr/bin/home-net-vpn-identity initialize
+        ;;
  settings) settings ;;
  save-settings) shift; save_settings "$@" ;;
  preview) preview ;;
