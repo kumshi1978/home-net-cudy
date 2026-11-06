@@ -6,8 +6,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "root required"
 action=${1:-}
 case "$action:$#" in
-    prepare:3|prepare-upload:3|verify:1|promote:1|rollback:1|status:1) ;;
-    *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | prepare-upload ID COUNTRY < encrypted.conf.age | verify | promote | rollback | status" ;;
+    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1) ;;
+    *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | prepare-upload ID COUNTRY | prepare-upload-target ID COUNTRY SLOT ADDRESS | verify | promote | rollback | status" ;;
 esac
 
 base=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -48,7 +48,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-if [ "$action" = prepare-upload ]; then
+if [ "$action" = prepare-upload ] || [ "$action" = prepare-upload-target ]; then
     deployment=$2
     country=$3
     case "$deployment" in ''|*[!A-Za-z0-9._-]*) fail "invalid deployment ID";; esac
@@ -60,6 +60,13 @@ if [ "$action" = prepare-upload ]; then
     [ "$(wc -c <"$tmp/upload.age")" -le 65536 ] || fail "encrypted upload too large"
     IFS= read -r header <"$tmp/upload.age" || fail "invalid encrypted upload"
     [ "$header" = 'age-encryption.org/v1' ] || fail "invalid encrypted upload"
+    if [ "$action" = prepare-upload-target ]; then
+        case "$4" in awg_main|awg_backup) ;; *) fail "invalid requested slot";; esac
+        case "$5" in ''|*[!0-9./]*) fail "invalid requested address";; esac
+        requested_slot=$4
+        requested_address=$5
+        action=prepare-upload
+    fi
 fi
 
 command -v flock >/dev/null 2>&1 || fail "maintenance locking unavailable"
@@ -125,6 +132,12 @@ if [ "$action" = prepare ] || [ "$action" = prepare-upload ]; then
     active_slot
     previous=$active
     [ "$previous" != "$slot" ] || fail "manifest targets the active slot"
+    if [ -n "${requested_slot:-}" ]; then
+        [ "$slot" = "$requested_slot" ] || fail "inactive slot changed"
+        addresses=$(ip -4 -o address show dev "$slot") || fail "slot address unavailable"
+        printf '%s\n' "$addresses" | awk -v expected="$requested_address" '$4==expected {found=1} END{exit !found}' ||
+            fail "inactive slot address changed"
+    fi
     age -d -i /etc/home-net/keys/age-identity.txt -o "$tmp/client.conf" "$tmp/$router.conf.age" 2>/dev/null ||
         fail "router decryption failed"
     [ -s "$tmp/client.conf" ] || fail "empty router config"

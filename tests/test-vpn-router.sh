@@ -57,6 +57,11 @@ cat >"$tmp/age" <<'EOF'
 printf 'synthetic fixture\n' >"$5"
 EOF
 chmod +x "$tmp/config/adapter" "$tmp/age"
+cat >"$tmp/ip" <<'EOF'
+#!/bin/sh
+printf '7: %s    inet 10.8.1.13/32 scope global\n' "$6"
+EOF
+chmod +x "$tmp/ip"
 PATH="$tmp:$PATH"
 printf 'apartment-backup\n' >"$tmp/config/router-id"
 printf 'awg_main\n' >"$tmp/config/active"
@@ -113,6 +118,13 @@ test "$(cat "$tmp/config/active")" = awg_main
 test "$(cat "$tmp/config/candidate")" = baseline
 mv "$tmp/config/transaction" "$tmp/completed"
 run status | grep -qx "TRANSACTION_STATE='idle'"
+printf 'age-encryption.org/v1\n' >"$tmp/upload"
+reject prepare-upload-target canary DE awg_main 10.8.1.13/32 <"$tmp/upload"
+reject prepare-upload-target canary DE awg_backup 10.8.1.14/32 <"$tmp/upload"
+test ! -e "$tmp/config/transaction"
+run prepare-upload-target canary DE awg_backup 10.8.1.13/32 <"$tmp/upload"
+run rollback
+mv "$tmp/config/transaction" "$tmp/targeted"
 run prepare "$tmp/bundle" "$digest"
 run verify
 printf '%s\n' previous-boot >"$tmp/config/transaction/boot-id"
