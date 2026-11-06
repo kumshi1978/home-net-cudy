@@ -1,6 +1,55 @@
 #!/bin/sh
 set -eu
 
+fail() { echo "ERROR: $*" >&2; exit 1; }
+
+enroll_router_ssh() (
+    [ "$#" -eq 2 ] || fail "usage: install-all.sh --enroll-router-ssh SHA256:FINGERPRINT 'ssh-ed25519 PUBLIC_KEY'"
+    [ "$(id -u)" -eq 0 ] || fail "SSH enrollment requires root"
+    umask 077
+    expected=$1
+    printf '%s\n' "$expected" | grep -Eq '^SHA256:[A-Za-z0-9+/]{43}$' || fail "invalid trusted host fingerprint"
+    public=$(printf '%s\n' "$2" | awk '
+        NR==1 && $1=="ssh-ed25519" && length($2)==68 &&
+          $2 ~ "^AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]+$" { key=$2 }
+        END { if (NR!=1 || key=="") exit 1; print key }
+    ') || fail "expected one ED25519 public key"
+
+    directory=/etc/dropbear
+    keys=$directory/authorized_keys
+    host_key=$directory/dropbear_ed25519_host_key
+    [ -d "$directory" ] && [ ! -L "$directory" ] && [ -f "$host_key" ] && [ ! -L "$host_key" ] ||
+        fail "local Dropbear host key unavailable"
+    actual=$(dropbearkey -y -f "$host_key" 2>/dev/null | awk '$1=="Fingerprint:" && NF==2 {print $2}')
+    [ "$actual" = "$expected" ] || fail "router host fingerprint does not match"
+    [ ! -L "$keys" ] && { [ ! -e "$keys" ] || [ -f "$keys" ]; } || fail "unsafe authorized_keys"
+    lock=$directory/.home-net-ssh-enrollment
+    mkdir "$lock" || fail "SSH enrollment is busy"
+    temp=
+    trap 'if [ -n "$temp" ]; then rm -f "$temp"; fi; rmdir "$lock"' EXIT
+    trap 'exit 1' HUP INT TERM
+    if [ -f "$keys" ] && awk -v key="$public" '
+        /^[[:space:]]*#/ {next}
+        {for (i=2;i<=NF;i++) if ($(i-1)=="ssh-ed25519" && $i==key) found=1}
+        END {exit !found}
+    ' "$keys"; then
+        echo "HOME NET: this public key is already enrolled."
+        exit 0
+    fi
+    temp=$(mktemp "$directory/.authorized_keys.XXXXXX") || fail "cannot stage authorized_keys"
+    if [ -f "$keys" ]; then awk '{print}' "$keys" >"$temp"; fi
+    printf 'no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 %s home-net-ssh-enrollment\n' "$public" >>"$temp"
+    chmod 0600 "$temp"
+    mv -f "$temp" "$keys"
+    echo "HOME NET: SSH key enrolled. Test a new SSH connection."
+)
+
+if [ "${1:-}" = "--enroll-router-ssh" ]; then
+    shift
+    enroll_router_ssh "$@"
+    exit $?
+fi
+
 BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.8.0}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="$(mktemp -d /tmp/home-net-bundle.XXXXXX)" || exit 1
@@ -22,7 +71,6 @@ HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT="${HOME_NET_BOOTSTRAP_HEALTH_TIMEOUT:-600}"
 HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL="${HOME_NET_BOOTSTRAP_HEALTH_RETRY_INTERVAL:-10}"
 HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES="${HOME_NET_BOOTSTRAP_HEALTH_MAX_BAD_CYCLES:-3}"
 
-fail() { echo "ERROR: $*" >&2; exit 1; }
 valid_payload_sha() {
     printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{40}$'
 }

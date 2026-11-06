@@ -372,4 +372,35 @@ do
 done
 echo 'PASS monitoring_disruptive_action_scan'
 
+mkdir "$TARGET/dropbear"
+touch "$TARGET/dropbear/dropbear_ed25519_host_key"
+printf '%s\n' 'ssh-ed25519 other-key existing-user' >"$TARGET/dropbear/authorized_keys"
+sed "s@directory=/etc/dropbear@directory=$TARGET/dropbear@" "$INSTALLER" >"$TMP/enrollment-installer"
+cat >"$BIN/id" <<'EOF_ID'
+#!/bin/sh
+echo 0
+EOF_ID
+cat >"$BIN/dropbearkey" <<'EOF_DROPBEAR'
+#!/bin/sh
+printf 'Fingerprint: %s\n' "$TEST_HOST_FINGERPRINT"
+EOF_DROPBEAR
+chmod +x "$BIN/id" "$BIN/dropbearkey"
+fingerprint="SHA256:$(printf '%043d' 0)"
+public="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI$(printf '%043d' 0) fixture"
+run_enrollment() {
+    PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT="$1" sh "$TMP/enrollment-installer" --enroll-router-ssh "$fingerprint" "$public"
+}
+if run_enrollment wrong; then
+    echo 'unexpected success on a different router' >&2
+    exit 1
+fi
+test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 1
+for attempt in 1 2; do
+    run_enrollment "$fingerprint"
+done
+test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 2
+grep -Fxq 'ssh-ed25519 other-key existing-user' "$TARGET/dropbear/authorized_keys"
+grep -Fq 'home-net-ssh-enrollment' "$TARGET/dropbear/authorized_keys"
+echo 'PASS router_ssh_enrollment'
+
 echo 'All install-all safety tests passed.'
