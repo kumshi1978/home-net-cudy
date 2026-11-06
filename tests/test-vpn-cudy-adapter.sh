@@ -42,9 +42,11 @@ echo awg_main >"$tmp/active"
 printf 'baseline\n\n' >"$tmp/awg_backup"
 cat >"$tmp/candidate" <<'EOF'
 [Interface]
+ListenPort = 51820
 PrivateKey = fixture
 [Peer]
 PublicKey = fixture
+AdvancedSecurity = on
 AllowedIPs = 0.0.0.0/0
 Endpoint = 192.0.2.1:1234
 EOF

@@ -56,8 +56,8 @@ validate() {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
             if (value == "" || seen[key]++) exit 1
-            if (section == 1 && key ~ /^(PrivateKey|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5])$/) next
-            if (section == 2 && key ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive)$/) next
+            if (section == 1 && key ~ /^(PrivateKey|ListenPort|Jc|Jmin|Jmax|S[1-4]|H[1-4]|I[1-5])$/) next
+            if (section == 2 && key ~ /^(PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive|AdvancedSecurity)$/) next
             exit 1
         }
         END {
