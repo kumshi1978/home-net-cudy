@@ -59,7 +59,16 @@ EOF
 chmod +x "$tmp/config/adapter" "$tmp/age"
 cat >"$tmp/ip" <<'EOF'
 #!/bin/sh
-printf '7: %s    inet 10.8.1.13/32 scope global\n' "$6"
+case "$6" in
+    awg_backup) address=10.8.1.13/32 ;;
+    awg_main)
+        [ ! -e "$TEST_CONFIG/no-active-address" ] || exit 0
+        address=10.8.1.2/32
+        if [ -e "$TEST_CONFIG/duplicate-address" ]; then address=10.8.1.13/24; fi
+        ;;
+    *) exit 1 ;;
+esac
+printf '7: %s    inet %s scope global\n' "$6" "$address"
 EOF
 chmod +x "$tmp/ip"
 PATH="$tmp:$PATH"
@@ -121,6 +130,12 @@ run status | grep -qx "TRANSACTION_STATE='idle'"
 printf 'age-encryption.org/v1\n' >"$tmp/upload"
 reject prepare-upload-target canary DE awg_main 10.8.1.13/32 <"$tmp/upload"
 reject prepare-upload-target canary DE awg_backup 10.8.1.14/32 <"$tmp/upload"
+touch "$TEST_CONFIG/duplicate-address"
+reject prepare-upload-target canary DE awg_backup 10.8.1.13/32 <"$tmp/upload"
+rm "$TEST_CONFIG/duplicate-address"
+touch "$TEST_CONFIG/no-active-address"
+reject prepare-upload-target canary DE awg_backup 10.8.1.13/32 <"$tmp/upload"
+rm "$TEST_CONFIG/no-active-address"
 test ! -e "$tmp/config/transaction"
 run prepare-upload-target canary DE awg_backup 10.8.1.13/32 <"$tmp/upload"
 run rollback
