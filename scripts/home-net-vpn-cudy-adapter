@@ -13,7 +13,15 @@ slot() {
 }
 
 quiescent() {
-    # These services can rewrite Podkop or restart it outside our transaction.
+    # The supported Failover release shares the controller's inherited lock.
+    if [ -f "$config/failover-lock-version" ] &&
+        grep -Fxq '1.4.2' "$config/failover-lock-version" &&
+        grep -Fxq "INSTALLED_VERSION='1.4.2'" /etc/podkop-awg-failover.conf 2>/dev/null &&
+        [ /proc/self/fd/9 -ef /var/run/home-net-vpn-maintenance.lock ] &&
+        flock -n 9; then
+        return 0
+    fi
+    # Older or independently invoked writers must remain quiescent.
     for writer in podkop-awg-failover podkop-health podkop-late-start; do
         init=/etc/init.d/$writer
         if [ -x "$init" ] && "$init" enabled; then return 1; fi
@@ -71,8 +79,8 @@ fingerprint() {
 }
 
 healthy() {
-    /etc/init.d/podkop running &&
-        pidof sing-box >/dev/null &&
+    # Podkop initializes the configuration and exits; sing-box serves traffic.
+    home-net-install-verify services >/dev/null &&
         timeout 10 nslookup github.com 127.0.0.1 >/dev/null
 }
 

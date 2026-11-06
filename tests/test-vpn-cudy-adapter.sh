@@ -5,7 +5,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export TEST="$tmp"
 mkdir -p "$tmp/bin" "$tmp/init" "$tmp/transaction/backup"
-sed 's@/etc/home-net/vpn@$TEST@g; s@/etc/init.d@$TEST/init@g' \
+sed 's@/etc/home-net/vpn@$TEST@g; s@/etc/init.d@$TEST/init@g; s@/etc/podkop-awg-failover.conf@$TEST/failover.conf@g; s@/var/run/home-net-vpn-maintenance.lock@$TEST/maintenance.lock@g' \
     "$root/scripts/home-net-vpn-cudy-adapter" >"$tmp/adapter"
 cat >"$tmp/bin/mock" <<'EOF'
 #!/bin/sh
@@ -28,13 +28,14 @@ case "${0##*/}:$1" in
     timeout:45)
         echo restart >>"$TEST/restarts"
         if [ -e "$TEST/fail-restart" ]; then rm "$TEST/fail-restart"; exit 1; fi ;;
-    podkop:running) exit 0 ;;
+    home-net-install-verify:services) [ ! -e "$TEST/unhealthy" ] ;;
     *) exit 1 ;;
 esac
 EOF
 chmod +x "$tmp/bin/mock"
-for cmd in ubus uci awg curl pidof timeout; do cp "$tmp/bin/mock" "$tmp/bin/$cmd"; done
-cp "$tmp/bin/mock" "$tmp/init/podkop"
+for cmd in ubus uci awg curl pidof timeout home-net-install-verify; do
+    cp "$tmp/bin/mock" "$tmp/bin/$cmd"
+done
 export PATH="$tmp/bin:$PATH"
 echo main >"$tmp/podkop-section"
 echo awg_main >"$tmp/active"
@@ -53,6 +54,25 @@ reject() { if run "$@"; then echo "unexpected success: $1" >&2; exit 1; fi; }
 touch "$tmp/conflict"
 reject snapshot awg_main awg_backup "$backup"
 test ! -e "$backup/target.conf"
+printf "%s\n" "INSTALLED_VERSION='1.4.2'" >"$tmp/failover.conf"
+(
+    exec 9>"$tmp/maintenance.lock"
+    flock -n 9
+    reject snapshot awg_main awg_backup "$backup"
+)
+echo 1.4.2 >"$tmp/failover-lock-version"
+reject snapshot awg_main awg_backup "$backup"
+(
+    exec 9>"$tmp/unrelated.lock"
+    reject snapshot awg_main awg_backup "$backup"
+)
+(
+    exec 9>"$tmp/maintenance.lock"
+    flock -n 9
+    run snapshot awg_main awg_backup "$backup"
+)
+test -s "$backup/target.conf"
+rm "$tmp/failover.conf"
 rm "$tmp/conflict"
 cp "$tmp/candidate" "$tmp/unsafe"
 echo 'PostUp = fixture' >>"$tmp/unsafe"
@@ -67,6 +87,9 @@ echo "$(($(date +%s) + 60))" >"$backup/staged-at"
 reject verify awg_main awg_backup DE
 echo "$(($(date +%s) - 30))" >"$backup/staged-at"
 reject verify awg_main awg_backup FR
+touch "$tmp/unhealthy"
+reject verify awg_main awg_backup DE
+rm "$tmp/unhealthy"
 run verify awg_main awg_backup DE
 printf 'drift\n' >>"$tmp/awg_backup"
 reject promote awg_main awg_backup
