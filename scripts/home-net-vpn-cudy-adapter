@@ -110,7 +110,13 @@ probe() {
 switch_to() {
     # Match Failover's runtime UCI behavior. Persisting this is a later operation.
     uci set "$option=$1" &&
-        timeout 45 /etc/init.d/podkop restart 9>&-
+        timeout 45 /etc/init.d/podkop restart 9>&- || return 1
+    # procd returns before the new proxy and firewall rules are ready.
+    deadline=$(( $(date +%s) + 20 ))
+    until healthy; do
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep 1
+    done
 }
 
 matches_candidate() {

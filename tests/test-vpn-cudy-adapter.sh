@@ -27,13 +27,21 @@ case "${0##*/}:$1" in
     timeout:10) exit 0 ;;
     timeout:45)
         echo restart >>"$TEST/restarts"
-        if [ -e "$TEST/fail-restart" ]; then rm "$TEST/fail-restart"; exit 1; fi ;;
-    home-net-install-verify:services) [ ! -e "$TEST/unhealthy" ] ;;
+        if [ -e "$TEST/fail-restart" ]; then rm "$TEST/fail-restart"; exit 1; fi
+        if [ -e "$TEST/slow-restart" ]; then touch "$TEST/warming-up"; fi ;;
+    home-net-install-verify:services)
+        if [ -e "$TEST/warming-up" ]; then
+            rm "$TEST/warming-up"
+            echo retry >>"$TEST/readiness"
+            exit 1
+        fi
+        [ ! -e "$TEST/unhealthy" ] ;;
+    sleep:1) exit 0 ;;
     *) exit 1 ;;
 esac
 EOF
 chmod +x "$tmp/bin/mock"
-for cmd in ubus uci awg curl pidof timeout home-net-install-verify; do
+for cmd in ubus uci awg curl pidof timeout home-net-install-verify sleep; do
     cp "$tmp/bin/mock" "$tmp/bin/$cmd"
 done
 export PATH="$tmp/bin:$PATH"
@@ -106,7 +114,9 @@ test "$(cat "$tmp/active")" = awg_backup
 touch "$tmp/fail-restart"
 reject restore awg_main awg_backup "$backup"
 test "$(cat "$tmp/active")" = awg_main
+touch "$tmp/slow-restart"
 run restore awg_main awg_backup "$backup"
 run check-restored awg_main awg_backup "$backup"
+test "$(cat "$tmp/readiness")" = retry
 test "$(wc -l <"$tmp/restarts")" -eq 3
 echo 'PASS: Cudy adapter isolation and retry'
