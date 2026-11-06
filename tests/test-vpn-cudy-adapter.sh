@@ -18,7 +18,9 @@ case "${0##*/}:$1" in
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
     awg:showconf) cat "$TEST/$2" ;;
     awg:syncconf) cp "$3" "$TEST/$2" ;;
-    awg:show) printf 'fixture %s\n' "$(($(date +%s) - 1))" ;;
+    awg:show)
+        if [ "$3" = endpoints ]; then printf 'fixture 192.0.2.2:1234\n'
+        else printf 'fixture %s\n' "$(($(date +%s) - 1))"; fi ;;
     curl:-q)
         case "$*" in *'if!awg_'* ) ;; *) exit 1 ;; esac
         case "$*" in *'/country') echo DE ;; *) echo 203.0.113.1 ;; esac ;;
@@ -88,6 +90,9 @@ cp "$tmp/candidate" "$tmp/unsafe"
 echo 'PostUp = fixture' >>"$tmp/unsafe"
 reject validate awg_backup "$tmp/unsafe"
 run snapshot awg_main awg_backup "$backup"
+sed 's/192.0.2.1:1234/192.0.2.2:9999/' "$tmp/candidate" >"$tmp/same-server"
+reject stage awg_main awg_backup "$tmp/same-server"
+test "$(cat "$tmp/awg_backup")" = baseline
 run stage awg_main awg_backup "$tmp/candidate"
 run restore awg_main awg_backup "$backup"
 test ! -e "$tmp/restarts"
