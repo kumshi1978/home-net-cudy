@@ -10,6 +10,8 @@ BIN="$TMP/bin"
 PAYLOADS="$TMP/payloads"
 TARGET="$TMP/target"
 mkdir -p "$BIN" "$PAYLOADS" "$TARGET/init.d" "$TARGET/backups"
+sed "s@/etc/dropbear@$TARGET/dropbear@g" "$INSTALLER" >"$TMP/isolated-installer"
+INSTALLER="$TMP/isolated-installer"
 
 cat > "$BIN/wget" <<'EOF_WGET'
 #!/bin/sh
@@ -402,5 +404,21 @@ test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 2
 grep -Fxq 'ssh-ed25519 other-key existing-user' "$TARGET/dropbear/authorized_keys"
 grep -Fq 'home-net-ssh-enrollment' "$TARGET/dropbear/authorized_keys"
 echo 'PASS router_ssh_enrollment'
+
+for fingerprint in \
+    SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk \
+    SHA256:r6IunrKZhSr4+yZKDplOHnCuBG5hkZIFYN6C+sJsKio
+do
+    printf '%s\n' 'ssh-ed25519 other-key existing-user' >"$TARGET/dropbear/authorized_keys"
+    for attempt in 1 2; do
+        PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT="$fingerprint" sh "$INSTALLER" --enroll-fleet-ssh
+    done
+    test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 2
+    grep -Fq 'AAAAC3NzaC1lZDI1NTE5AAAAIJXI4twvnAhgDxzpiGMYBziGNroem/r8H0BqY1aC1gSP' "$TARGET/dropbear/authorized_keys"
+done
+cp "$TARGET/dropbear/authorized_keys" "$TMP/keys-before"
+PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT=unregistered sh "$INSTALLER" --enroll-fleet-ssh
+cmp "$TARGET/dropbear/authorized_keys" "$TMP/keys-before"
+echo 'PASS fleet_ssh_enrollment_is_host_pinned_and_idempotent'
 
 echo 'All install-all safety tests passed.'

@@ -50,6 +50,27 @@ if [ "${1:-}" = "--enroll-router-ssh" ]; then
     exit $?
 fi
 
+# This public installer must never grant access to unrelated installations.
+# Bind fleet enrollment to independently verified physical host keys.
+enroll_fleet_ssh() (
+    host_key=/etc/dropbear/dropbear_ed25519_host_key
+    [ -f "$host_key" ] && [ ! -L "$host_key" ] || return 0
+    actual=$(dropbearkey -y -f "$host_key" 2>/dev/null | awk '$1=="Fingerprint:" && NF==2 {print $2}')
+    case "$actual" in
+        SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk|\
+        SHA256:r6IunrKZhSr4+yZKDplOHnCuBG5hkZIFYN6C+sJsKio)
+            enroll_router_ssh "$actual" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJXI4twvnAhgDxzpiGMYBziGNroem/r8H0BqY1aC1gSP'
+            ;;
+        *) echo 'HOME NET: SSH enrollment skipped for an unregistered host.' ;;
+    esac
+)
+
+# Allows the same fleet policy to be delivered without installing a new bundle.
+if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
+    enroll_fleet_ssh
+    exit $?
+fi
+
 BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.8.0}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="$(mktemp -d /tmp/home-net-bundle.XXXXXX)" || exit 1
@@ -407,4 +428,5 @@ if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     fi
 fi
 
+enroll_fleet_ssh || fail "bundle installed, but fleet SSH enrollment failed"
 printf '\nHOME NET bundle installation complete.\n'
