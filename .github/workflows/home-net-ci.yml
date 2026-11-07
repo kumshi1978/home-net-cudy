@@ -18,6 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         suite:
+          - country-lookup
+          - monitoring-startup-grace
           - home-net-update-self-test
           - home-net-update
           - install-all-safety

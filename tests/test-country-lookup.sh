@@ -20,10 +20,12 @@ cat > "$BIN/curl" <<'EOF_CURL'
 #!/bin/sh
 iface=direct
 url=''
+http=200
+trap 'printf "\n%s" "$http"' EXIT
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --interface) iface="$2"; shift 2 ;;
-        --connect-timeout|--max-time) shift 2 ;;
+        --connect-timeout|--max-time|--max-filesize|-w) shift 2 ;;
         -4|-f|-s|-S|-fsS) shift ;;
         *) url="$1"; shift ;;
     esac
@@ -32,20 +34,26 @@ printf '%s iface=%s\n' "$url" "$iface" >> "$MOCK_CALLS"
 
 case "$MOCK_SCENARIO:$url" in
     ipinfo-200:https://ipinfo.io/country) printf 'DE\n' ;;
-    ipinfo-429:https://ipinfo.io/country) exit 22 ;;
+    ipinfo-429:https://ipinfo.io/country) http=429; exit 22 ;;
     ipinfo-429:https://ipapi.co/country) printf 'DE\n' ;;
     invalid-json:https://ipinfo.io/country) printf '{"error":"Rate limit hit"}\n' ;;
     invalid-json:https://ipapi.co/country) printf 'DE\n' ;;
-    api-fallback:https://ipinfo.io/country|api-fallback:https://ipapi.co/country) exit 22 ;;
+    api-fallback:https://ipinfo.io/country|api-fallback:https://ipapi.co/country) http=429; exit 22 ;;
     api-fallback:https://api.country.is/) printf '{"ip":"159.195.225.183","country":"DE"}\n' ;;
-    api-json-error:https://ipinfo.io/country|api-json-error:https://ipapi.co/country) exit 22 ;;
+    api-json-error:https://ipinfo.io/country|api-json-error:https://ipapi.co/country) http=429; exit 22 ;;
     api-json-error:https://api.country.is/) printf '{"error":"rate limit","country":"DE"}\n' ;;
-    all-fail:*) exit 22 ;;
+    timeout:*) http=000; exit 28 ;;
+    all-fail:*) http=429; exit 22 ;;
     direct-wan:https://ipinfo.io/country) printf 'RU\n' ;;
     malformed:https://ipinfo.io/country) printf 'DEU\n' ;;
     malformed:https://ipapi.co/country) printf 'de\n' ;;
     malformed:https://api.country.is/) printf '{"country":"DEU"}\n' ;;
-    *) exit 22 ;;
+    ip-primary:https://ifconfig.me/ip) printf '203.0.113.7' ;;
+    ip-fallback:https://ifconfig.me/ip) http=429; exit 22 ;;
+    ip-fallback:https://api.ipify.org) printf '203.0.113.8' ;;
+    ip-invalid:https://ifconfig.me/ip) printf '<html>blocked</html>' ;;
+    ip-invalid:https://api.ipify.org) printf '999.1.1.1' ;;
+    *) http=429; exit 22 ;;
 esac
 EOF_CURL
 chmod +x "$BIN/logger" "$BIN/curl"
@@ -136,6 +144,28 @@ done
 [ "$(grep -Fc 'country provider ipinfo failed' "$TMP/logs")" -eq 1 ]
 [ "$(grep -Fc 'fallback provider ipapi used' "$TMP/logs")" -eq 1 ]
 echo 'PASS provider_logs_are_rate_limited'
+[ "$(grep -Fc 'https://ipinfo.io/country' "$TMP/calls")" -eq 1 ]
+grep -Fq 'http=429 curl=22' "$TMP/logs"
+# A throttled tunnel must not suppress the direct provider.
+PATH="$BIN:$PATH" MOCK_SCENARIO=ipinfo-200 MOCK_CALLS="$TMP/calls" MOCK_LOGS="$TMP/logs" PODKOP_COUNTRY_LOG_DIR="$TMP/log-state" sh "$LOOKUP" > "$TMP/output"
+[ "$(cat "$TMP/output")" = DE ]
+echo 'PASS cooldown_is_scoped_to_interface'
+run_lookup ip-primary --ip awg_main
+assert_country 203.0.113.7
+[ "$(wc -l < "$TMP/calls" | tr -d ' ')" -eq 1 ]
+run_lookup ip-fallback --ip awg_backup
+assert_country 203.0.113.8
+grep -Fq 'https://api.ipify.org iface=awg_backup' "$TMP/calls"
+grep -Fq 'http=429 curl=22' "$TMP/logs"
+echo 'PASS ip_fallback_preserves_interface'
+run_lookup ip-invalid --ip
+[ "$LOOKUP_RC" -ne 0 ] && [ ! -s "$TMP/output" ]
+grep -Fq 'reason=invalid_body' "$TMP/logs"
+run_lookup timeout --ip
+[ "$LOOKUP_RC" -ne 0 ] && [ ! -s "$TMP/output" ]
+grep -Fq 'http=000 curl=28' "$TMP/logs"
+echo 'PASS malformed_ip_and_timeout_remain_unknown'
+
 
 if grep -Eq '(^|[[:space:]/])(jq|python|python3)([[:space:]]|$)' "$LOOKUP"; then
     echo 'lookup must not depend on jq or python' >&2
@@ -150,4 +180,27 @@ grep -Fq 'BACKUP_COUNTRY="$(get_country awg_backup)"' "$DAEMON"
 grep -Fq 'COUNTRY=$("$COUNTRY_LOOKUP" "$IFACE"' "$CHECK"
 echo 'PASS shared_lookup_is_used_for_all_country_checks'
 
-echo 'All country lookup tests passed.'
+# Execute the real state writer with isolated probes, never a live router.
+sed '/^wait_for_startup_ready$/,$d' "$DAEMON" > "$TMP/daemon-lib"
+(
+ FIXTURE_DIR="$TMP"
+ . "$TMP/daemon-lib"
+ LOG_DIR="$TMP/health"; mkdir -p "$LOG_DIR"; STATE_FILE="$LOG_DIR/state"
+ uci() { echo awg_main; }
+ log() { printf '%s\n' "$*" >> "$FIXTURE_DIR/health.log"; }
+ check_singbox() { return 0; }; check_podkop() { return 0; }; check_fakeip() { return 0; }
+ get_ip() { echo 203.0.113.7; }; get_country() { echo DE; }
+ get_wan_ip() { return 0; }; get_direct_country() { echo RU; }
+ CHECK_STARTED_EPOCH=$(date +%s); CHECK_STARTED=fixture
+ write_state
+ grep -qx 'STATUS=UNKNOWN' "$STATE_FILE"
+ grep -qx 'REASON=WAN IP CHECK UNKNOWN' "$STATE_FILE"
+ grep -qx 'SERVICE_CHECK=SKIPPED' "$STATE_FILE"
+ # The same successful IP on both paths remains a real bypass failure.
+ get_wan_ip() { echo 203.0.113.7; }
+ write_state
+ grep -qx 'STATUS=FAIL' "$STATE_FILE"
+ grep -Fq 'VPN BYPASS DETECTED' "$FIXTURE_DIR/health.log"
+)
+echo 'PASS unknown_probe_and_real_bypass_have_distinct_states'
+echo 'All country lookup tests passed.' 

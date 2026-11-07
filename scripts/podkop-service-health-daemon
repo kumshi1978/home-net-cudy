@@ -39,11 +39,11 @@ get_country() {
 }
 
 get_ip() {
-    curl -4 --interface "$1" --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
+    "$COUNTRY_LOOKUP" --ip "$1" 2>/dev/null
 }
 
 get_wan_ip() {
-    curl -4 --connect-timeout 5 --max-time 10 -fsS https://ifconfig.me/ip 2>/dev/null
+    "$COUNTRY_LOOKUP" --ip 2>/dev/null
 }
 
 get_direct_country() {
@@ -97,6 +97,7 @@ wait_for_startup_ready() {
 set_unknown() {
     if [ "$STATUS" = "OK" ]; then
         STATUS="UNKNOWN"
+        REASON="${1:-CHECK UNKNOWN}"
         [ -n "${1:-}" ] && log "$1"
     fi
 }
@@ -127,6 +128,7 @@ write_state() {
     BACKUP_COUNTRY=""
     STATUS="OK"
     SERVICE_CHECK="SKIPPED"
+    REASON=""
 
     if check_singbox; then SING_BOX="RUNNING"; else SING_BOX="FAIL"; set_fail; log "SING-BOX CHECK FAILED"; fi
     if check_podkop; then PODKOP="RUNNING"; else PODKOP="FAIL"; set_fail; log "PODKOP NFT/IP RULE CHECK FAILED"; fi
@@ -197,6 +199,7 @@ write_state() {
 
     {
         echo "STATUS=$STATUS"
+        echo "REASON=$REASON"
         echo "ACTIVE_VPN=$ACTIVE"
         echo "ACTIVE_IP=$ACTIVE_IP"
         echo "ACTIVE_COUNTRY=$ACTIVE_COUNTRY"
