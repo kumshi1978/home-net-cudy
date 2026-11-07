@@ -23,6 +23,7 @@ IDENTITY = Path("/etc/home-net/keys/age-identity.txt")
 STATE = Path("/etc/home-net/vpn/control-agent")
 TRANSACTION = STATE.parent / "transaction"
 HELPER = "/usr/bin/home-net-vpn-router"
+SLOT_PREPARER = Path("/usr/sbin/home-net-prepare-slots.py")
 TERMINAL = {"verified", "failed", "recovery_required", "expired"}
 VERIFY_DELAYS = (0, 10, 20, 30, 40, 50)
 POLL_INTERVAL = 60
@@ -211,8 +212,21 @@ def router_topology():
         pass
     ready = (Path(HELPER).is_file() and (STATE.parent / "adapter").is_file()
              and (STATE.parent / "podkop-section").is_file())
-    return {"active": active if active in slots else None, "slots": slots, "transaction": transaction,
-            "delivery_ready": ready}
+    result = {"active": active if active in slots else None, "slots": slots, "transaction": transaction,
+              "delivery_ready": ready}
+    try:
+        result["preparation"] = json.loads((STATE.parent / "slot-preparation.json").read_text())
+    except (OSError, ValueError):
+        pass
+    return result
+
+
+def prepare_slots(role=None):
+    if SLOT_PREPARER.is_file():
+        command = [sys.executable, str(SLOT_PREPARER)]
+        if role:
+            command.append(role)
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
 
 
 def poll_once():
@@ -231,6 +245,7 @@ def poll_once():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
+        prepare_slots(config.get("router"))
         response = call(config, "poll", {"topology": router_topology()})
         if config.get("device_id") and response.get("assignment"):
             assignment = response["assignment"]
@@ -245,6 +260,7 @@ def poll_once():
             if config.get("router") != assignment:
                 config["router"] = assignment
                 save_config(config)
+                prepare_slots(assignment)
         if response["job"] is None:
             return
         if not config.get("router") or not Path(HELPER).is_file():

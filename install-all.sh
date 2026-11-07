@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.6}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.7}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -127,8 +127,8 @@ fetch() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    control_ref='76cfeb19a970e307742f54a5efdfe514ea844a54'
-    control_hash='a70d5c2def63186d813922dd59231d0abf8b0e7b0cede6ee66223249ddc07082'
+    control_ref='c4ff6b67ecf9b71b5d71ead25ca0341c70e76a70'
+    control_hash='d259ce8a5895fcdb217efb09fcc77ed68d98988dc605927c9cd0a33032a27e9a'
     control_installer="$TMP_DIR/control-agent-install.sh"
     fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
@@ -345,7 +345,7 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 # Existing stable installations only need the host-pinned access policy.
 # Keep runtime services and configuration untouched on this patch path.
 case "$PREVIOUS_ACTIVE_VERSION" in
-    1.7.4|1.7.5|1.7.6)
+    1.7.4|1.7.5|1.7.6|1.7.7)
         before_last="$(health_value LAST_CHECK)"
         before_started="$(health_value CHECK_STARTED)"
         enroll_fleet_ssh || fail "fleet SSH enrollment failed"
