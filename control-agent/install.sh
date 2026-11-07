@@ -33,9 +33,9 @@ command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unava
 for file in cudy.py vpn-control-cudy.init prepare-slots.py; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
-echo 'a193b4f3c04e9c04fb76a07681baca2caf4bf8db172ef8bde85fd5274b503ac2  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo '09cbf03174ea5fdf6b0ecf4f6adb0474ac1b12f45efbbbab02ededa9f474a7e1  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
 echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
-echo '45cf3d92db4304922b582de5c1bd46e0809c8502411f44e3a8e1c597c2dd7e26  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'b808e0ba97f52fc3a4b242aba469e2f76739cc7c8c82fc7aa4b650b615ba63f2  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/prepare-slots.py"
 sh -n "$work/vpn-control-cudy.init"

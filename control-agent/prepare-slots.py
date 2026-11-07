@@ -78,6 +78,8 @@ def generated_key():
 def prepare(role=None):
     if role is not None and role not in ROLES:
         raise Blocked('invalid_role')
+    if role is None:
+        return {'phase': 'awaiting_role', 'slots': {}, 'changed': False, 'at': int(time.time())}
     if not PROTO.is_file():
         raise Blocked('awg_protocol_missing')
     if NETWORK.is_symlink() or not NETWORK.is_file() or NETWORK.parent.is_symlink() or LOCK.is_symlink():
@@ -159,8 +161,6 @@ def main():
         if len(sys.argv) > 2:
             raise Blocked('invalid_role')
         role = sys.argv[1] if len(sys.argv) == 2 else None
-        if role is None and ROUTER_ID.is_file() and not ROUTER_ID.is_symlink():
-            role = ROUTER_ID.read_text().strip()
         status = prepare(role)
     except Blocked as error:
         status = {'phase': 'blocked', 'reason': str(error), 'at': int(time.time())}
