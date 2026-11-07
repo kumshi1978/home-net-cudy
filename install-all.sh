@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.7}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.8}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -344,8 +344,8 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 
 # Existing stable installations only need the host-pinned access policy.
 # Keep runtime services and configuration untouched on this patch path.
-case "$PREVIOUS_ACTIVE_VERSION" in
-    1.7.4|1.7.5|1.7.6|1.7.7)
+case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
+    1.7.[4567]:1.7.[4567])
         before_last="$(health_value LAST_CHECK)"
         before_started="$(health_value CHECK_STARTED)"
         enroll_fleet_ssh || fail "fleet SSH enrollment failed"

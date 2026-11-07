@@ -25,10 +25,11 @@ echo 'Fingerprint: SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk'
 EOF
 printf '#!/bin/sh\necho 0\n' >"$TMP/bin/id"
 chmod +x "$TMP/bin/"*
+sed "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.7'/" "$ROOT/bundle.conf" > "$TMP/legacy-bundle"
 for version in 1.7.4 1.7.5; do
     printf "ACTIVE_VERSION='%s'\n" "$version" >"$TMP/state"
     cp "$TMP/state" "$TMP/before"
-    PATH="$TMP/bin:$PATH" FIXTURE_BUNDLE="$ROOT/bundle.conf" \
+    PATH="$TMP/bin:$PATH" FIXTURE_BUNDLE="$TMP/legacy-bundle" \
         HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_UPDATE_STATE="$TMP/state" \
         HOME_NET_AUTO_UPDATE_MODE=apply HOME_NET_SKIP_VERSION_RECORD=1 \
         sh "$TMP/install" >"$TMP/output"
@@ -37,7 +38,7 @@ for version in 1.7.4 1.7.5; do
 done
 test "$(wc -l <"$TMP/dropbear/authorized_keys")" -eq 1
 mkdir "$TMP/dropbear/.home-net-ssh-enrollment"
-if PATH="$TMP/bin:$PATH" FIXTURE_BUNDLE="$ROOT/bundle.conf" \
+if PATH="$TMP/bin:$PATH" FIXTURE_BUNDLE="$TMP/legacy-bundle" \
     HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_UPDATE_STATE="$TMP/state" \
     HOME_NET_AUTO_UPDATE_MODE=apply HOME_NET_SKIP_VERSION_RECORD=1 \
     sh "$TMP/install" >"$TMP/output" 2>&1; then

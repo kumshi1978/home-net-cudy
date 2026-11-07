@@ -5,10 +5,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 bundle_version="$(tr -d '\r\n' < "$ROOT/VERSION")"
 monitoring_version="$(tr -d '\r\n' < "$ROOT/MONITORING_VERSION")"
-[ "$bundle_version" = "1.7.7" ]
+[ "$bundle_version" = "1.7.8" ]
 [ "$monitoring_version" = "1.7.4" ]
 
-grep -Fqx "HOME_NET_BUNDLE_VERSION='1.7.7'" "$ROOT/bundle.conf"
+grep -Fqx "HOME_NET_BUNDLE_VERSION='1.7.8'" "$ROOT/bundle.conf"
 grep -Fqx "MONITORING_VERSION='1.7.4'" "$ROOT/bundle.conf"
 
 bootstrap_ref="$(sed -n "s/^MONITORING_BOOTSTRAP_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")"
@@ -22,7 +22,7 @@ grep -Fqx "POLICY_SCHEMA='1'" "$ROOT/rollout-policy.conf"
 policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 case "$policy_tag:$policy_rollout" in
-    v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.7:manual|v1.7.7:canary|v1.7.7:fleet) ;;
+    v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.8:manual|v1.7.8:canary|v1.7.8:fleet) ;;
     *) echo "unexpected policy for the 1.7.4 rollout-test bundle" >&2; exit 1 ;;
 esac
 
