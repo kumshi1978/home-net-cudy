@@ -341,6 +341,10 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_BUNDLE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION=unknown
+MONITORING_PATCH=0
+case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
+    1.7.[45678]:1.7.8) MONITORING_PATCH=1 ;;
+esac
 
 # Existing stable installations only need the host-pinned access policy.
 # Keep runtime services and configuration untouched on this patch path.
@@ -381,6 +385,11 @@ reject_disruptive_actions "$HOME_NET_UPDATE_INIT_SRC" "HOME NET updater init"
 INSTALLED_FAILOVER="$(sed -n "s/^INSTALLED_VERSION='\([^']*\)'$/\1/p" "$HOME_NET_FAILOVER_CONF" 2>/dev/null | tail -n 1)"
 NEED_FAILOVER=0
 [ "$INSTALLED_FAILOVER" = "$FAILOVER_VERSION" ] || NEED_FAILOVER=1
+if [ "$MONITORING_PATCH" = 1 ]; then
+    # This patch updates monitoring and enrollment, never the live failover.
+    NEED_FAILOVER=0
+    printf 'Preserving installed Failover %s and its update policy\n' "$INSTALLED_FAILOVER"
+fi
 
 if [ "$NEED_FAILOVER" = "1" ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ]; then
     if [ "$ACTION_CLASS" = "SAFE" ] && [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = "1" ]; then
@@ -402,7 +411,7 @@ else
 fi
 
 printf '\n===== SET AUTO UPDATE MODE =====\n'
-if [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ]; then
+if [ "$MONITORING_PATCH" != 1 ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ]; then
     sed -i "s/^AUTO_UPDATE_MODE='[^']*'/AUTO_UPDATE_MODE='$AUTO_UPDATE_MODE'/" /etc/podkop-awg-update.conf
     /etc/init.d/podkop-awg-update restart >/dev/null 2>&1 || true
 fi

@@ -83,6 +83,17 @@ for ref in unset v1.7.4 "$UPDATER_REF"; do
     echo "PASS release_ref_$ref"
 done
 
+# A monitoring-only upgrade must preserve a newer installed failover.
+printf "ACTIVE_VERSION='1.7.7'\n" > "$TMP/target/state"
+printf "INSTALLED_VERSION='1.4.2'\n" > "$TMP/failover"
+: > "$TMP/urls"
+run_installer unset
+assert_urls v1.7.8
+grep -Fq 'Preserving installed Failover 1.4.2 and its update policy' "$TMP/output"
+! grep -Fq '/openwrt-podkop-awg-failover/' "$TMP/urls"
+rm "$TMP/target/state"
+echo 'PASS monitoring_patch_preserves_newer_failover'
+
 for ref in main master feature/example refs/heads/main; do
     : > "$TMP/urls"
     if run_installer "$ref"; then
