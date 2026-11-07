@@ -23,15 +23,16 @@ while [ "$#" -gt 0 ]; do
     case "$1" in -O) out=$2; shift 2 ;; -T) shift 2 ;; -q) shift ;; *) url=$1; shift ;; esac
 done
 case "$url" in
-    */bundle.conf) cp "$CONTROL_ROOT/bundle.conf" "$out" ;;
+    */bundle.conf) cp "$CONTROL_BUNDLE" "$out" ;;
     https://raw.githubusercontent.com/kumshi1978/home-net-cudy/c4ff6b67ecf9b71b5d71ead25ca0341c70e76a70/control-agent/install.sh)
         cp "$CONTROL_FIXTURE" "$out" ;;
     *) echo 'unexpected component download' >&2; exit 1 ;;
 esac
 EOF
 chmod +x "$TMP/bin/wget"
+sed "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.7'/" "$ROOT/bundle.conf" > "$TMP/legacy-bundle"
 run() {
-    PATH="$TMP/bin:$PATH" CONTROL_ROOT="$ROOT" CONTROL_FIXTURE="$TMP/control" CONTROL_MARKER="$TMP/marker" \
+    PATH="$TMP/bin:$PATH" CONTROL_ROOT="$ROOT" CONTROL_BUNDLE="$TMP/legacy-bundle" CONTROL_FIXTURE="$TMP/control" CONTROL_MARKER="$TMP/marker" \
         HOME_NET_CONTROL_AUTOREGISTER=1 HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_UPDATE_STATE="$TMP/state" \
         HOME_NET_AUTO_UPDATE_MODE=apply HOME_NET_SKIP_VERSION_RECORD=1 sh "$TMP/install"
 }

@@ -203,4 +203,4 @@ sed '/^wait_for_startup_ready$/,$d' "$DAEMON" > "$TMP/daemon-lib"
  grep -Fq 'VPN BYPASS DETECTED' "$FIXTURE_DIR/health.log"
 )
 echo 'PASS unknown_probe_and_real_bypass_have_distinct_states'
-echo 'All country lookup tests passed.' 
+echo 'All country lookup tests passed.'

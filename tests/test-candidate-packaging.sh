@@ -6,15 +6,15 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 bundle_version="$(tr -d '\r\n' < "$ROOT/VERSION")"
 monitoring_version="$(tr -d '\r\n' < "$ROOT/MONITORING_VERSION")"
 [ "$bundle_version" = "1.7.8" ]
-[ "$monitoring_version" = "1.7.4" ]
+[ "$monitoring_version" = "1.7.8" ]
 
 grep -Fqx "HOME_NET_BUNDLE_VERSION='1.7.8'" "$ROOT/bundle.conf"
-grep -Fqx "MONITORING_VERSION='1.7.4'" "$ROOT/bundle.conf"
+grep -Fqx "MONITORING_VERSION='1.7.8'" "$ROOT/bundle.conf"
 
 bootstrap_ref="$(sed -n "s/^MONITORING_BOOTSTRAP_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")"
 printf '%s\n' "$bootstrap_ref" | grep -Eq '^[0-9a-f]{40}$'
-grep -Fq "HOME_NET_RELEASE_REF:-v1.7.4" "$ROOT/install.sh"
-grep -Fq 'downloading v1.7.4' "$ROOT/install.sh"
+grep -Fq "HOME_NET_RELEASE_REF:-v1.7.8" "$ROOT/install.sh"
+grep -Fq 'downloading v1.7.8' "$ROOT/install.sh"
 
 # Policy remains mutable after release: packaging must permit the documented
 # manual -> canary -> fleet stages without changing the immutable bundle.
@@ -29,4 +29,4 @@ esac
 grep -Fq 'HOME_NET_SKIP_VERSION_RECORD' "$ROOT/install-all.sh"
 grep -Fq 'if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then' "$ROOT/install-all.sh"
 
-echo "PASS candidate_packaging_1_7_7"
+echo "PASS candidate_packaging_1_7_8"
