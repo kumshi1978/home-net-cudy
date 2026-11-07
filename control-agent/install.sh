@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+umask 077
+fail() { echo "HOME NET Control: $*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'root required'
+ref=${HOME_NET_CONTROL_REF:-}
+printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$' || fail 'immutable source commit required'
+directory=/etc/home-net/keys
+for path in /etc/home-net "$directory" /usr/sbin/vpn-control-cudy.py /etc/init.d/vpn-control-cudy /etc/vpn-control-agent.json; do
+    [ ! -L "$path" ] || fail 'unsafe installation path'
+done
+lock=/var/run/home-net-control-install.lock
+mkdir "$lock" || fail 'installation already running'
+work=$(mktemp -d /tmp/home-net-control.XXXXXX) || { rmdir "$lock"; exit 1; }
+identity_temp=
+agent_temp=
+init_temp=
+trap 'rm -rf "$work"; [ -z "$identity_temp" ] || rm -f "$identity_temp"; [ -z "$agent_temp" ] || rm -f "$agent_temp"; [ -z "$init_temp" ] || rm -f "$init_temp"; rmdir "$lock"' EXIT
+trap 'exit 1' HUP INT TERM
+if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import ssl,fcntl,json' >/dev/null 2>&1 ||
+   ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+    if command -v apk >/dev/null 2>&1; then
+        apk add python3 python3-ssl age || fail 'agent dependencies unavailable'
+    elif command -v opkg >/dev/null 2>&1; then
+        opkg update && opkg install python3 python3-ssl age || fail 'agent dependencies unavailable'
+    else
+        fail 'OpenWrt package manager unavailable'
+    fi
+fi
+python3 -c 'import ssl,fcntl,json' || fail 'Python SSL unavailable'
+command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unavailable'
+for file in cudy.py vpn-control-cudy.init; do
+    wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
+done
+echo 'ab67691f4e94c870683e3a7c8e9e197ce2d5eecafed110c2c8b3a38357f254de  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
+python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
+sh -n "$work/vpn-control-cudy.init"
+mkdir -p "$directory"
+chmod 0700 "$directory"
+identity=$directory/age-identity.txt
+[ ! -L "$identity" ] || fail 'unsafe encryption identity'
+if [ ! -e "$identity" ]; then
+    identity_temp=$(mktemp "$directory/.age-identity.XXXXXX")
+    age-keygen >"$identity_temp" 2>/dev/null
+    chmod 0600 "$identity_temp"
+    ln "$identity_temp" "$identity"
+fi
+[ -f "$identity" ] || fail 'local encryption identity unavailable'
+chmod 0600 "$identity"
+age-keygen -y "$identity" >"$work/recipient"
+backup=/etc/home-net/control-agent-backup
+[ ! -L "$backup" ] || fail 'unsafe backup directory'
+mkdir -p "$backup"
+for file in /usr/sbin/vpn-control-cudy.py /etc/init.d/vpn-control-cudy; do
+    [ ! -L "$backup/$(basename "$file")" ] || fail 'unsafe backup path'
+    [ ! -e "$file" ] || cp -p "$file" "$backup/$(basename "$file")"
+done
+# Existing credentials and any local AWG configuration are preserved.
+agent_temp=$(mktemp /usr/sbin/.vpn-control-cudy.XXXXXX)
+cp "$work/cudy.py" "$agent_temp"
+chmod 0755 "$agent_temp"
+mv "$agent_temp" /usr/sbin/vpn-control-cudy.py
+init_temp=$(mktemp /etc/init.d/.vpn-control-cudy.XXXXXX)
+cp "$work/vpn-control-cudy.init" "$init_temp"
+chmod 0755 "$init_temp"
+mv "$init_temp" /etc/init.d/vpn-control-cudy
+/etc/init.d/vpn-control-cudy enable
+if /etc/init.d/vpn-control-cudy running; then
+    /etc/init.d/vpn-control-cudy restart
+else
+    /etc/init.d/vpn-control-cudy start
+fi
+echo 'HOME NET Control: agent installed; new devices await approval in the panel.'

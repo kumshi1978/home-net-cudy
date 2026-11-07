@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+export HOME_NET_CONTROL_AUTOREGISTER=0
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
