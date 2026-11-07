@@ -6,7 +6,7 @@ fail() { echo "HOME NET Control: $*" >&2; exit 1; }
 ref=${HOME_NET_CONTROL_REF:-}
 printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$' || fail 'immutable source commit required'
 directory=/etc/home-net/keys
-for path in /etc/home-net "$directory" /usr/sbin/vpn-control-cudy.py /etc/init.d/vpn-control-cudy /etc/vpn-control-agent.json; do
+for path in /etc/home-net "$directory" /usr/sbin/vpn-control-cudy.py /usr/sbin/home-net-prepare-slots.py /etc/init.d/vpn-control-cudy /etc/vpn-control-agent.json; do
     [ ! -L "$path" ] || fail 'unsafe installation path'
 done
 lock=/var/run/home-net-control-install.lock
@@ -15,7 +15,8 @@ work=$(mktemp -d /tmp/home-net-control.XXXXXX) || { rmdir "$lock"; exit 1; }
 identity_temp=
 agent_temp=
 init_temp=
-trap 'rm -rf "$work"; [ -z "$identity_temp" ] || rm -f "$identity_temp"; [ -z "$agent_temp" ] || rm -f "$agent_temp"; [ -z "$init_temp" ] || rm -f "$init_temp"; rmdir "$lock"' EXIT
+slots_temp=
+trap 'rm -rf "$work"; [ -z "$identity_temp" ] || rm -f "$identity_temp"; [ -z "$agent_temp" ] || rm -f "$agent_temp"; [ -z "$init_temp" ] || rm -f "$init_temp"; [ -z "$slots_temp" ] || rm -f "$slots_temp"; rmdir "$lock"' EXIT
 trap 'exit 1' HUP INT TERM
 if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import ssl,fcntl,json' >/dev/null 2>&1 ||
    ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
@@ -29,12 +30,14 @@ if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import ssl,fcntl,json' 
 fi
 python3 -c 'import ssl,fcntl,json' || fail 'Python SSL unavailable'
 command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unavailable'
-for file in cudy.py vpn-control-cudy.init; do
+for file in cudy.py vpn-control-cudy.init prepare-slots.py; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
-echo 'ab67691f4e94c870683e3a7c8e9e197ce2d5eecafed110c2c8b3a38357f254de  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'a193b4f3c04e9c04fb76a07681baca2caf4bf8db172ef8bde85fd5274b503ac2  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
 echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
+echo '45cf3d92db4304922b582de5c1bd46e0809c8502411f44e3a8e1c597c2dd7e26  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
+python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/prepare-slots.py"
 sh -n "$work/vpn-control-cudy.init"
 mkdir -p "$directory"
 chmod 0700 "$directory"
@@ -52,7 +55,7 @@ age-keygen -y "$identity" >"$work/recipient"
 backup=/etc/home-net/control-agent-backup
 [ ! -L "$backup" ] || fail 'unsafe backup directory'
 mkdir -p "$backup"
-for file in /usr/sbin/vpn-control-cudy.py /etc/init.d/vpn-control-cudy; do
+for file in /usr/sbin/vpn-control-cudy.py /usr/sbin/home-net-prepare-slots.py /etc/init.d/vpn-control-cudy; do
     [ ! -L "$backup/$(basename "$file")" ] || fail 'unsafe backup path'
     [ ! -e "$file" ] || cp -p "$file" "$backup/$(basename "$file")"
 done
@@ -65,6 +68,11 @@ init_temp=$(mktemp /etc/init.d/.vpn-control-cudy.XXXXXX)
 cp "$work/vpn-control-cudy.init" "$init_temp"
 chmod 0755 "$init_temp"
 mv "$init_temp" /etc/init.d/vpn-control-cudy
+slots_temp=$(mktemp /usr/sbin/.home-net-prepare-slots.XXXXXX)
+cp "$work/prepare-slots.py" "$slots_temp"
+chmod 0755 "$slots_temp"
+mv "$slots_temp" /usr/sbin/home-net-prepare-slots.py
+python3 /usr/sbin/home-net-prepare-slots.py || true
 /etc/init.d/vpn-control-cudy enable
 if /etc/init.d/vpn-control-cudy running; then
     /etc/init.d/vpn-control-cudy restart
