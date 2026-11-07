@@ -22,6 +22,7 @@ jobs:
           - home-net-update
           - install-all-safety
           - ssh-policy-patch
+          - control-agent-bootstrap
           - home-net-luci
           - home-net-install-verify
           - luci-detached-upgrade

@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.5}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.6}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -122,6 +122,18 @@ fetch() {
     else
         fail "wget or curl is required"
     fi
+}
+
+install_control_agent() {
+    [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
+    [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
+    control_ref='088bb5ee7589858bdd5c99314836e6b9292bd02f'
+    control_hash='05d4168d421cb8a4526c9baa45ad2a1cc806a1cf37c93cea73f16c63caa9435e'
+    control_installer="$TMP_DIR/control-agent-install.sh"
+    fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
+    echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
+    sh -n "$control_installer" || fail "control installer syntax check failed"
+    HOME_NET_CONTROL_REF="$control_ref" sh "$control_installer" || fail "control agent installation failed"
 }
 
 reject_disruptive_actions() {
@@ -333,10 +345,11 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 # Existing stable installations only need the host-pinned access policy.
 # Keep runtime services and configuration untouched on this patch path.
 case "$PREVIOUS_ACTIVE_VERSION" in
-    1.7.4|1.7.5)
+    1.7.4|1.7.5|1.7.6)
         before_last="$(health_value LAST_CHECK)"
         before_started="$(health_value CHECK_STARTED)"
         enroll_fleet_ssh || fail "fleet SSH enrollment failed"
+        install_control_agent
         if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != 1 ]; then
             wait_for_fresh_bootstrap_health "$before_last" "$before_started" ||
                 fail "SSH policy applied but fresh monitoring health is not OK"
@@ -446,4 +459,5 @@ if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
 fi
 
 enroll_fleet_ssh || fail "bundle installed, but fleet SSH enrollment failed"
+install_control_agent
 printf '\nHOME NET bundle installation complete.\n'
