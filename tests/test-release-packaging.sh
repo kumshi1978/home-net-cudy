@@ -78,7 +78,7 @@ for ref in unset v1.7.4 "$UPDATER_REF"; do
     : > "$TMP/urls"
     run_installer "$ref" || { cat "$TMP/output" >&2; exit 1; }
     expected="$ref"
-    [ "$ref" != unset ] || expected=v1.7.6
+    [ "$ref" != unset ] || expected=v1.7.7
     assert_urls "$expected"
     echo "PASS release_ref_$ref"
 done
