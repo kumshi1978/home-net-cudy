@@ -245,7 +245,6 @@ def poll_once():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        prepare_slots(config.get("router"))
         response = call(config, "poll", {"topology": router_topology()})
         if config.get("device_id") and response.get("assignment"):
             assignment = response["assignment"]
@@ -260,7 +259,7 @@ def poll_once():
             if config.get("router") != assignment:
                 config["router"] = assignment
                 save_config(config)
-                prepare_slots(assignment)
+        prepare_slots(config.get("router") if response.get("prepare_slots") is True else None)
         if response["job"] is None:
             return
         if not config.get("router") or not Path(HELPER).is_file():

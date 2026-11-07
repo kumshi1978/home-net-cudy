@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.7}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.8}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -127,8 +127,8 @@ fetch() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    control_ref='c4ff6b67ecf9b71b5d71ead25ca0341c70e76a70'
-    control_hash='d259ce8a5895fcdb217efb09fcc77ed68d98988dc605927c9cd0a33032a27e9a'
+    control_ref='c026a85b6c4728675320b1db8c9da16f9e8e8804'
+    control_hash='372e2b18d109915207c613acdbd7459cadb296ec4a9bd31574230938c94805ff'
     control_installer="$TMP_DIR/control-agent-install.sh"
     fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
@@ -341,11 +341,15 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_BUNDLE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION=unknown
+MONITORING_PATCH=0
+case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
+    1.7.[45678]:1.7.8) MONITORING_PATCH=1 ;;
+esac
 
 # Existing stable installations only need the host-pinned access policy.
 # Keep runtime services and configuration untouched on this patch path.
-case "$PREVIOUS_ACTIVE_VERSION" in
-    1.7.4|1.7.5|1.7.6|1.7.7)
+case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
+    1.7.[4567]:1.7.[4567])
         before_last="$(health_value LAST_CHECK)"
         before_started="$(health_value CHECK_STARTED)"
         enroll_fleet_ssh || fail "fleet SSH enrollment failed"
@@ -381,6 +385,11 @@ reject_disruptive_actions "$HOME_NET_UPDATE_INIT_SRC" "HOME NET updater init"
 INSTALLED_FAILOVER="$(sed -n "s/^INSTALLED_VERSION='\([^']*\)'$/\1/p" "$HOME_NET_FAILOVER_CONF" 2>/dev/null | tail -n 1)"
 NEED_FAILOVER=0
 [ "$INSTALLED_FAILOVER" = "$FAILOVER_VERSION" ] || NEED_FAILOVER=1
+if [ "$MONITORING_PATCH" = 1 ]; then
+    # This patch updates monitoring and enrollment, never the live failover.
+    NEED_FAILOVER=0
+    printf 'Preserving installed Failover %s and its update policy\n' "$INSTALLED_FAILOVER"
+fi
 
 if [ "$NEED_FAILOVER" = "1" ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ]; then
     if [ "$ACTION_CLASS" = "SAFE" ] && [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = "1" ]; then
@@ -402,7 +411,7 @@ else
 fi
 
 printf '\n===== SET AUTO UPDATE MODE =====\n'
-if [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ]; then
+if [ "$MONITORING_PATCH" != 1 ] && [ "${HOME_NET_STAGE_ONLY:-0}" != "1" ] && [ -f /etc/podkop-awg-update.conf ]; then
     sed -i "s/^AUTO_UPDATE_MODE='[^']*'/AUTO_UPDATE_MODE='$AUTO_UPDATE_MODE'/" /etc/podkop-awg-update.conf
     /etc/init.d/podkop-awg-update restart >/dev/null 2>&1 || true
 fi

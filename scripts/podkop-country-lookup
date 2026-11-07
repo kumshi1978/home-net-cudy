@@ -3,7 +3,10 @@
 # Country lookup with bounded provider fallback
 # Version: 1.4.3
 
+MODE=country
+if [ "${1:-}" = --ip ]; then MODE=ip; shift; fi
 IFACE="${1:-}"
+case "$IFACE" in *[!a-zA-Z0-9_.-]*) exit 2 ;; esac
 TAG="podkop-country"
 LOG_DIR="${PODKOP_COUNTRY_LOG_DIR:-/tmp/podkop-service-health/country-provider-log}"
 LOG_INTERVAL="${PODKOP_COUNTRY_LOG_INTERVAL:-3600}"
@@ -28,9 +31,9 @@ log_once() {
 fetch_body() {
     url="$1"
     if [ -n "$IFACE" ]; then
-        "$CURL_BIN" -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 -fsS "$url" 2>/dev/null
+        "$CURL_BIN" -4 --interface "$IFACE" --connect-timeout 5 --max-time 10 --max-filesize 4096 -fsS -w '\n%{http_code}' "$url" 2>/dev/null
     else
-        "$CURL_BIN" -4 --connect-timeout 5 --max-time 10 -fsS "$url" 2>/dev/null
+        "$CURL_BIN" -4 --connect-timeout 5 --max-time 10 --max-filesize 4096 -fsS -w '\n%{http_code}' "$url" 2>/dev/null
     fi
 }
 
@@ -46,10 +49,26 @@ lookup_provider() {
     url="$2"
     format="$3"
 
-    body="$(fetch_body "$url")" || {
-        log_once "failed-$provider" "country provider $provider failed"
+    scope="${IFACE:-direct}"
+    cooldown="$LOG_DIR/cooldown-$scope-$provider"
+    now="$(date +%s)"
+    until=0
+    [ ! -r "$cooldown" ] || until="$(cat "$cooldown" 2>/dev/null)"
+    case "$until" in ''|*[!0-9]*) until=0 ;; esac
+    [ "$until" -le "$now" ] || return 1
+    response="$(fetch_body "$url")"
+    rc=$?
+    code="$(printf '%s\n' "$response" | tail -n 1)"
+    body="$(printf '%s\n' "$response" | sed '$d')"
+    case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
+    if [ "$rc" -ne 0 ] || [ "$code" != 200 ]; then
+        log_once "failed-$scope-$provider" "$MODE provider $provider failed interface=$scope http=$code curl=$rc"
+        if [ "$code" = 429 ]; then
+            printf '%s\n' "$((now + 900))" > "$cooldown.tmp.$$"
+            mv "$cooldown.tmp.$$" "$cooldown"
+        fi
         return 1
-    }
+    fi
 
     case "$format" in
         plain) country="$(printf '%s' "$body" | tr -d '\r\n')" ;;
@@ -59,11 +78,17 @@ lookup_provider() {
                 *) country="$(printf '%s' "$body" | sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([A-Z][A-Z]\)".*/\1/p')" ;;
             esac
             ;;
+        ipv4)
+            country="$(printf '%s' "$body" | tr -d '\r\n')"
+            if ! printf '%s\n' "$country" | awk -F. 'NF != 4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || length($i)>3 || $i+0>255) exit 1}'; then
+                country=""
+            fi
+            ;;
         *) return 1 ;;
     esac
 
-    if ! valid_country "$country"; then
-        log_once "failed-$provider" "country provider $provider failed"
+    if { [ "$MODE" = country ] && ! valid_country "$country"; } || [ -z "$country" ]; then
+        log_once "invalid-$scope-$provider" "$MODE provider $provider failed interface=$scope http=$code reason=invalid_body"
         return 1
     fi
 
@@ -72,6 +97,14 @@ lookup_provider() {
 }
 
 COUNTRY_RESULT=""
+if [ "$MODE" = ip ]; then
+    if lookup_provider ifconfig https://ifconfig.me/ip ipv4 || lookup_provider ipify https://api.ipify.org ipv4; then
+        [ "$provider" = ifconfig ] || log_once "used-ip-$scope" "IP fallback provider $provider used interface=$scope"
+        printf '%s\n' "$COUNTRY_RESULT"
+        exit 0
+    fi
+    exit 1
+fi
 if lookup_provider ipinfo https://ipinfo.io/country plain; then
     printf '%s\n' "$COUNTRY_RESULT"
     exit 0
