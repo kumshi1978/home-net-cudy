@@ -1,7 +1,77 @@
 #!/bin/sh
 set -eu
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.4}"
+fail() { echo "ERROR: $*" >&2; exit 1; }
+
+enroll_router_ssh() (
+    [ "$#" -eq 2 ] || fail "usage: install-all.sh --enroll-router-ssh SHA256:FINGERPRINT 'ssh-ed25519 PUBLIC_KEY'"
+    [ "$(id -u)" -eq 0 ] || fail "SSH enrollment requires root"
+    umask 077
+    expected=$1
+    printf '%s\n' "$expected" | grep -Eq '^SHA256:[A-Za-z0-9+/]{43}$' || fail "invalid trusted host fingerprint"
+    public=$(printf '%s\n' "$2" | awk '
+        NR==1 && $1=="ssh-ed25519" && length($2)==68 &&
+          $2 ~ "^AAAAC3NzaC1lZDI1NTE5AAAAI[A-Za-z0-9+/]+$" { key=$2 }
+        END { if (NR!=1 || key=="") exit 1; print key }
+    ') || fail "expected one ED25519 public key"
+
+    directory=/etc/dropbear
+    keys=$directory/authorized_keys
+    host_key=$directory/dropbear_ed25519_host_key
+    [ -d "$directory" ] && [ ! -L "$directory" ] && [ -f "$host_key" ] && [ ! -L "$host_key" ] ||
+        fail "local Dropbear host key unavailable"
+    actual=$(dropbearkey -y -f "$host_key" 2>/dev/null | awk '$1=="Fingerprint:" && NF==2 {print $2}')
+    [ "$actual" = "$expected" ] || fail "router host fingerprint does not match"
+    [ ! -L "$keys" ] && { [ ! -e "$keys" ] || [ -f "$keys" ]; } || fail "unsafe authorized_keys"
+    lock=$directory/.home-net-ssh-enrollment
+    mkdir "$lock" || fail "SSH enrollment is busy"
+    temp=
+    trap 'if [ -n "$temp" ]; then rm -f "$temp"; fi; rmdir "$lock"' EXIT
+    trap 'exit 1' HUP INT TERM
+    if [ -f "$keys" ] && awk -v key="$public" '
+        /^[[:space:]]*#/ {next}
+        {for (i=2;i<=NF;i++) if ($(i-1)=="ssh-ed25519" && $i==key) found=1}
+        END {exit !found}
+    ' "$keys"; then
+        echo "HOME NET: this public key is already enrolled."
+        exit 0
+    fi
+    temp=$(mktemp "$directory/.authorized_keys.XXXXXX") || fail "cannot stage authorized_keys"
+    if [ -f "$keys" ]; then awk '{print}' "$keys" >"$temp"; fi
+    printf 'no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 %s home-net-ssh-enrollment\n' "$public" >>"$temp"
+    chmod 0600 "$temp"
+    mv -f "$temp" "$keys"
+    echo "HOME NET: SSH key enrolled. Test a new SSH connection."
+)
+
+if [ "${1:-}" = "--enroll-router-ssh" ]; then
+    shift
+    enroll_router_ssh "$@"
+    exit $?
+fi
+
+# This public installer must never grant access to unrelated installations.
+# Bind fleet enrollment to independently verified physical host keys.
+enroll_fleet_ssh() (
+    host_key=/etc/dropbear/dropbear_ed25519_host_key
+    [ -f "$host_key" ] && [ ! -L "$host_key" ] || return 0
+    actual=$(dropbearkey -y -f "$host_key" 2>/dev/null | awk '$1=="Fingerprint:" && NF==2 {print $2}')
+    case "$actual" in
+        SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk|\
+        SHA256:r6IunrKZhSr4+yZKDplOHnCuBG5hkZIFYN6C+sJsKio)
+            enroll_router_ssh "$actual" 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJXI4twvnAhgDxzpiGMYBziGNroem/r8H0BqY1aC1gSP'
+            ;;
+        *) echo 'HOME NET: SSH enrollment skipped for an unregistered host.' ;;
+    esac
+)
+
+# Allows the same fleet policy to be delivered without installing a new bundle.
+if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
+    enroll_fleet_ssh
+    exit $?
+fi
+
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.5}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -260,6 +330,23 @@ PREVIOUS_ACTIVE_VERSION="$(state_value ACTIVE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION="$(state_value INSTALLED_BUNDLE_VERSION "$HOME_NET_UPDATE_STATE")"
 [ -n "$PREVIOUS_ACTIVE_VERSION" ] || PREVIOUS_ACTIVE_VERSION=unknown
 
+# Existing stable installations only need the host-pinned access policy.
+# Keep runtime services and configuration untouched on this patch path.
+case "$PREVIOUS_ACTIVE_VERSION" in
+    1.7.4|1.7.5)
+        before_last="$(health_value LAST_CHECK)"
+        before_started="$(health_value CHECK_STARTED)"
+        enroll_fleet_ssh || fail "fleet SSH enrollment failed"
+        if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != 1 ]; then
+            wait_for_fresh_bootstrap_health "$before_last" "$before_started" ||
+                fail "SSH policy applied but fresh monitoring health is not OK"
+            write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+        fi
+        echo 'HOME NET: stable SSH policy patch complete.'
+        exit 0
+        ;;
+esac
+
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
 HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/scripts/home-net-update"
@@ -358,4 +445,5 @@ if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     fi
 fi
 
+enroll_fleet_ssh || fail "bundle installed, but fleet SSH enrollment failed"
 printf '\nHOME NET bundle installation complete.\n'
