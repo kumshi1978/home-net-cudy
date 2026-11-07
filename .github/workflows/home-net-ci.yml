@@ -21,6 +21,7 @@ jobs:
           - home-net-update-self-test
           - home-net-update
           - install-all-safety
+          - ssh-policy-patch
           - home-net-luci
           - home-net-install-verify
           - luci-detached-upgrade

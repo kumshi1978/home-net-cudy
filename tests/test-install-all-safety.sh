@@ -10,6 +10,8 @@ BIN="$TMP/bin"
 PAYLOADS="$TMP/payloads"
 TARGET="$TMP/target"
 mkdir -p "$BIN" "$PAYLOADS" "$TARGET/init.d" "$TARGET/backups"
+sed "s@/etc/dropbear@$TARGET/dropbear@g" "$INSTALLER" >"$TMP/isolated-installer"
+INSTALLER="$TMP/isolated-installer"
 
 cat > "$BIN/wget" <<'EOF_WGET'
 #!/bin/sh
@@ -51,6 +53,7 @@ cat > "$PAYLOADS/bundle.conf" <<'EOF_BUNDLE'
 HOME_NET_BUNDLE_VERSION='1.5.2'
 FAILOVER_VERSION='1.4.1'
 FAILOVER_REPO='kumshi1978/openwrt-podkop-awg-failover'
+FAILOVER_REF='a17eea697601368ec2dcd55585dd6c40ed56c586'
 MONITORING_VERSION='1.4.3'
 MONITORING_REPO='kumshi1978/home-net-cudy'
 MONITORING_BOOTSTRAP_REF='33a10d50846a7ff2672e399d933a532b752f4128'
@@ -370,5 +373,52 @@ do
     cmp -s "$TARGET/original-updater" "$TARGET/home-net-update"
 done
 echo 'PASS monitoring_disruptive_action_scan'
+
+mkdir "$TARGET/dropbear"
+touch "$TARGET/dropbear/dropbear_ed25519_host_key"
+printf '%s\n' 'ssh-ed25519 other-key existing-user' >"$TARGET/dropbear/authorized_keys"
+sed "s@directory=/etc/dropbear@directory=$TARGET/dropbear@" "$INSTALLER" >"$TMP/enrollment-installer"
+cat >"$BIN/id" <<'EOF_ID'
+#!/bin/sh
+echo 0
+EOF_ID
+cat >"$BIN/dropbearkey" <<'EOF_DROPBEAR'
+#!/bin/sh
+printf 'Fingerprint: %s\n' "$TEST_HOST_FINGERPRINT"
+EOF_DROPBEAR
+chmod +x "$BIN/id" "$BIN/dropbearkey"
+fingerprint="SHA256:$(printf '%043d' 0)"
+public="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI$(printf '%043d' 0) fixture"
+run_enrollment() {
+    PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT="$1" sh "$TMP/enrollment-installer" --enroll-router-ssh "$fingerprint" "$public"
+}
+if run_enrollment wrong; then
+    echo 'unexpected success on a different router' >&2
+    exit 1
+fi
+test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 1
+for attempt in 1 2; do
+    run_enrollment "$fingerprint"
+done
+test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 2
+grep -Fxq 'ssh-ed25519 other-key existing-user' "$TARGET/dropbear/authorized_keys"
+grep -Fq 'home-net-ssh-enrollment' "$TARGET/dropbear/authorized_keys"
+echo 'PASS router_ssh_enrollment'
+
+for fingerprint in \
+    SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk \
+    SHA256:r6IunrKZhSr4+yZKDplOHnCuBG5hkZIFYN6C+sJsKio
+do
+    printf '%s\n' 'ssh-ed25519 other-key existing-user' >"$TARGET/dropbear/authorized_keys"
+    for attempt in 1 2; do
+        PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT="$fingerprint" sh "$INSTALLER" --enroll-fleet-ssh
+    done
+    test "$(wc -l <"$TARGET/dropbear/authorized_keys")" -eq 2
+    grep -Fq 'AAAAC3NzaC1lZDI1NTE5AAAAIJXI4twvnAhgDxzpiGMYBziGNroem/r8H0BqY1aC1gSP' "$TARGET/dropbear/authorized_keys"
+done
+cp "$TARGET/dropbear/authorized_keys" "$TMP/keys-before"
+PATH="$BIN:$PATH" TEST_HOST_FINGERPRINT=unregistered sh "$INSTALLER" --enroll-fleet-ssh
+cmp "$TARGET/dropbear/authorized_keys" "$TMP/keys-before"
+echo 'PASS fleet_ssh_enrollment_is_host_pinned_and_idempotent'
 
 echo 'All install-all safety tests passed.'
