@@ -32,7 +32,7 @@ command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unava
 for file in cudy.py vpn-control-cudy.init; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
-echo '9584a69ece67d84374f26a665512cb98440f58f632494c21c82b959d99033c72  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'ab67691f4e94c870683e3a7c8e9e197ce2d5eecafed110c2c8b3a38357f254de  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
 echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
 sh -n "$work/vpn-control-cudy.init"

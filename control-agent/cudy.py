@@ -51,9 +51,11 @@ def call(config, action, body):
     conn = WANConnection(config["server_ip"], config["wan_device"])
     try:
         path = "/agent/register" if action == "register" else "/agent/" + config.get("device_id", config.get("router", "")) + "/" + action
+        headers = {"Content-Type": "application/json"}
+        if action != "register":
+            headers["Authorization"] = "Bearer " + config["token"]
         conn.request("POST", path,
-                     canonical(body), {"Authorization": "Bearer " + config["token"],
-                                       "Content-Type": "application/json"})
+                     canonical(body), headers)
         response = conn.getresponse()
         data = response.read(100001)
         if response.status not in (200, 201) or len(data) > 100000:
