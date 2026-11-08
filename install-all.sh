@@ -127,8 +127,8 @@ fetch() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    control_ref='4dbb4c497b3ebcc73f7d9af3b64effe663e3cdec'
-    control_hash='36624a79ad097c6e699dd0ea16c0097c934218c7efa97607b1ca23b88a25dd30'
+    control_ref='ba3a1aa1ed67f9cc29ccf7724b19a0e6a17232bd'
+    control_hash='cf60857bd20bfac340b2ffffbb596266ceb194fb1da9e603a710ea56522e4684'
     control_installer="$TMP_DIR/control-agent-install.sh"
     fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
