@@ -14,3 +14,4 @@ jobs:
       - run: sh tests/test-vpn-cudy-adapter.sh
       - run: sh tests/test-home-net-vpn-manifest-validate.sh
       - run: python3 -m unittest discover -s tests -p test_vpn_persist.py
+      - run: python3 -m unittest discover -s tests -p test_vpn_rebind.py
