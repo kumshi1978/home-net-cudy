@@ -74,7 +74,7 @@ if [ -n "$packages" ]; then
                     if($i ~ /^Depends: /) d=substr($i,10)
                     if($i ~ /^Installed-Size: /) z=substr($i,17)
                     if($i ~ /^Provides: /) v=substr($i,11)
-                    if($i == "Status: install ok installed") installed=1
+                    if($i ~ /^Status: [^ ]+ [^ ]+ installed$/) installed=1
                 }
                 if(p=="") next
                 if(installed) have[p]=1

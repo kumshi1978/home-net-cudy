@@ -26,7 +26,7 @@ echo "$*" >>"$FIXTURE/calls"
 case "$1" in
     update) exit "${UPDATE_RC:-0}" ;;
     status) cat "$FIXTURE/status" ;;
-    install) touch "$FIXTURE/python-installed" ;;
+    install) [ "${IMPORTS_STAY_BROKEN:-0}" = 1 ] || touch "$FIXTURE/python-installed" ;;
     *) exit 91 ;;
 esac
 EOF
@@ -35,7 +35,7 @@ export FIXTURE="$TMP" FREE_KIB=100000
 export PATH="$TMP/bin:$PATH"
 cat >"$TMP/status" <<'EOF'
 Package: libc
-Status: install ok installed
+Status: install user installed
 
 Package: zlib
 Status: install ok installed
@@ -102,6 +102,13 @@ grep -q '^install python3-light python3-openssl python3-email python3-urllib$' "
 test ! -d "$TMP/install.lock"
 echo 'PASS compact package installation and import verification'
 rm "$TMP/python-installed"
+: >"$TMP/calls"
+if IMPORTS_STAY_BROKEN=1 run --prepare-dependencies; then
+    echo 'broken imports must be detected after package installation' >&2; exit 1
+fi
+grep -q '^install ' "$TMP/calls"
+grep -q 'required Python imports unavailable' "$TMP/output"
+echo 'PASS successful package command cannot hide missing required imports'
 : >"$TMP/calls"
 cat >"$TMP/bin/apk" <<'EOF'
 #!/bin/sh
