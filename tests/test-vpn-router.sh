@@ -201,6 +201,7 @@ echo awg_main > "$TEST_CONFIG/active"
 run prepare-upload-target third-reserve DE awg_backup2 10.8.1.210/32 < "$tmp/upload"
 reject accept
 run verify
+reject accept-id 00000000000000000000000000000000
 run accept
 test "$(cat "$TEST_CONFIG/active")" = awg_main
 test ! -e "$TEST_CONFIG/transaction"

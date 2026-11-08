@@ -6,7 +6,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "root required"
 action=${1:-}
 case "$action:$#" in
-    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1|capabilities:1|accept:1|set-order:2) ;;
+    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1|capabilities:1|accept:1|accept-id:2|set-order:2) ;;
     *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | prepare-upload ID COUNTRY | prepare-upload-target ID COUNTRY SLOT ADDRESS | verify | promote | rollback | status" ;;
 esac
 
@@ -27,7 +27,7 @@ if [ "$action" = status ]; then
     current=idle
     if [ -f "$state/phase" ]; then
         current=$(cat "$state/phase")
-        case "$current" in preparing|prepared|verified|promoting|promoted|restoring|rolled-back) ;;
+        case "$current" in accepted) current=verified ;; preparing|prepared|verified|promoting|promoted|restoring|rolled-back) ;;
             *) current=recovery-required ;;
         esac
         if [ "$(cat "$state/boot-id" 2>/dev/null || true)" != "$boot_id" ] &&
@@ -165,7 +165,8 @@ if [ "$action" = prepare ] || [ "$action" = prepare-upload ]; then
     digest "$tmp/$router.conf.age" >"$record/payload.sha256"
     run_adapter snapshot "$previous" "$slot" "$record/backup" || fail "backup failed"
     printf '%s\n' "$previous" "$slot" "$country" >"$record/metadata"
-    if [ "$action" = prepare-upload ]; then printf '%s\n' "$deployment" >"$record/deployment-id"; fi
+    if [ "$action" = prepare-upload ]; then printf '%s\n' "$deployment" >"$record/deployment-id"
+    else sed -n "s/^DEPLOYMENT_ID='\([^']*\)'$/\1/p" "$manifest" >"$record/deployment-id"; fi
     printf '%s\n' "$boot_id" >"$record/boot-id"
     printf '%s\n' preparing >"$record/phase"
     mv "$record" "$state"
@@ -184,7 +185,7 @@ fi
 
 if [ "$action" = set-order ]; then
     [ ! -e "$state" ] || fail "transaction still open"
-    case "$2" in 2|3) ;; *) fail "invalid order size";; esac
+    case "$2" in ''|*[!a-z0-9_,]*) fail "invalid order";; esac
     "$base/home-net-vpn-persist.py" --order "$2"
     exit $?
 fi
@@ -205,6 +206,12 @@ case "$slot" in awg_main|awg_backup|awg_backup2) ;; *) fail "invalid rollback me
 [ "$previous" != "$slot" ] || fail "invalid rollback metadata"
 case "$country" in [A-Z][A-Z]) ;; *) fail "invalid rollback metadata";; esac
 
+if [ "$action" = accept-id ]; then
+    case "$2" in ''|*[!0-9a-f]*) fail "invalid transaction id";; esac
+    [ "${#2}" = 32 ] && [ "$(cat "$state/deployment-id")" = "$2" ] || fail "transaction changed"
+    action=accept
+fi
+
 case "$action" in
     verify)
         case "$current" in prepared|verified) ;; *) fail "candidate is not prepared";; esac
@@ -215,17 +222,17 @@ case "$action" in
         phase verified
         ;;
     accept)
-        [ "$current" = verified ] || fail "verify required"
+        case "$current" in verified|accepted) ;; *) fail "verify required";; esac
+        completed=$(cat "$state/deployment-id")
+        case "$completed" in ''|.|..|*[!A-Za-z0-9._-]*) fail "invalid deployment id";; esac
+        [ ! -L "$config/completed" ] || fail "unsafe completed path"
+        mkdir -p "$config/completed"
+        [ ! -e "$config/completed/$completed" ] || fail "completed record exists"
         active_slot
         [ "$active" = "$previous" ] || fail "active slot changed"
         run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
         run_adapter persist "$previous" "$slot" || fail "candidate persistence failed"
         phase accepted
-        [ ! -L "$config/completed" ] || fail "unsafe completed path"
-        mkdir -p "$config/completed"
-        completed=$(cat "$state/deployment-id")
-        case "$completed" in ''|*[!A-Za-z0-9._-]*) fail "invalid deployment id";; esac
-        [ ! -e "$config/completed/$completed" ] || fail "completed record exists"
         mv "$state" "$config/completed/$completed"
         ;;
     promote)

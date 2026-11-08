@@ -14,6 +14,36 @@ key=base64.b64encode(b'a'*32).decode()
 CONF=('[Interface]\nPrivateKey = '+key+'\nJc = 4\n[Peer]\nPublicKey = '+key+'\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = 192.0.2.3:4340\n').encode()
 
 class Persist(unittest.TestCase):
+    def test_order_is_permutation_acknowledged_only_after_service_start_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);conf=root/'failover';watcher=root/'watcher';section=root/'section';ack=root/'ack'
+            conf.write_text("MAIN_AWG='awg_main'\nBACKUP_AWG='awg_backup'\nBACKUP2_AWG=''\nKEEP='yes'\n")
+            watcher.write_text('#!/bin/sh\nif [ "${1:-}" = --capabilities ]; then\n');section.write_text('main')
+            def command(args,**kwargs):
+                if args[0]==str(watcher):return b'awg_main awg_backup awg_backup2\n'
+                if args[0]=='ubus':return b'{"podkop-awg-failover":{"instances":{"watch":{"running":true}}}}'
+                index=persist.SLOTS.index(args[2] if args[0]=='awg' else args[-1])+1
+                if args[0]=='awg':return ('peer 192.0.2.'+str(index)+':4340\n').encode()
+                return ('1: dev inet 10.8.1.'+str(index)+'/32 scope global\n').encode()
+            with patch.multiple(persist,FAILOVER=conf,WATCHER=str(watcher),SECTION_FILE=section,ORDER_APPLIED=ack),patch.object(persist,'uci',return_value=b'awg_main'),patch.object(persist.subprocess,'check_output',side_effect=command),patch.object(persist.subprocess,'run') as restart:
+                persist.set_order('awg_backup,awg_main,awg_backup2')
+                self.assertEqual(json.loads(ack.read_text())['order'],['awg_backup','awg_main','awg_backup2'])
+                self.assertIn("KEEP='yes'",conf.read_text());self.assertEqual(restart.call_count,1)
+                persist.set_order('awg_backup,awg_main,awg_backup2');self.assertEqual(restart.call_count,1)
+                original=conf.read_bytes();ack.unlink()
+                with patch.object(persist.subprocess,'check_output',side_effect=lambda args,**kw:b'{}' if args[0]=='ubus' else command(args,**kw)):
+                    with self.assertRaises(ValueError):persist.set_order('awg_main,awg_backup2,awg_backup')
+                self.assertEqual(conf.read_bytes(),original);self.assertFalse(ack.exists())
+
+    def test_legacy_watcher_is_not_executed_for_capability_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);conf=root/'conf';watcher=root/'watcher'
+            conf.write_text('unchanged');watcher.write_text('#!/bin/sh\nwhile true; do sleep 1; done\n')
+            with patch.multiple(persist,FAILOVER=conf,WATCHER=str(watcher)),patch.object(persist.subprocess,'check_output') as command:
+                with self.assertRaises(ValueError):persist.set_order('awg_main,awg_backup')
+                command.assert_not_called()
+            self.assertEqual(conf.read_text(),'unchanged')
+
     def test_parser_rejects_injection_multiple_peers_and_invalid_addresses(self):
         self.assertEqual(persist.parse(CONF)['Jc'],'4')
         for bad in (CONF+b'[Peer]\n',CONF.replace(b'Jc = 4',b"Jc = '4'"),CONF.replace(b'192.0.2.3',b'999.0.0.1'),CONF.replace(b'PrivateKey',b'PostUp'),CONF.replace(b'0.0.0.0/0',b'not-a-network')):

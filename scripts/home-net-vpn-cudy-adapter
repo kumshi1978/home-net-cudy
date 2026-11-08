@@ -18,9 +18,11 @@ slot() {
 
 quiescent() {
     # The supported Failover release shares the controller's inherited lock.
-    if [ -f "$config/failover-lock-version" ] &&
-        grep -Fxq '1.4.2' "$config/failover-lock-version" &&
-        grep -Fxq "INSTALLED_VERSION='1.4.2'" /etc/podkop-awg-failover.conf 2>/dev/null &&
+    contract=$(cat "$config/failover-lock-version" 2>/dev/null || true)
+    supported=0
+    case "$contract" in 1.4.2|1.5.0) supported=1 ;; esac
+    if [ "$supported" = 1 ] &&
+        grep -Fxq "INSTALLED_VERSION='$contract'" /etc/podkop-awg-failover.conf 2>/dev/null &&
         [ /proc/self/fd/9 -ef /var/run/home-net-vpn-maintenance.lock ] &&
         flock -n 9; then
         return 0
