@@ -84,15 +84,34 @@ def persist(slot,expected):
         # Keep the complete private baseline in the existing rollback record.
         backup=BACKUP
         if backup.is_symlink() or backup.parent.is_symlink():raise ValueError('unsafe backup')
+        after=backup.with_name('network.after-persist.sha256')
         if backup.exists():
-            if backup.read_bytes()!=original:raise ValueError('backup differs; recovery required')
+            if backup.read_bytes()!=original:
+                if not after.is_symlink() and after.read_text().strip()==hashlib.sha256(original).hexdigest():return
+                raise ValueError('backup differs; recovery required')
         else:
             with backup.open('xb') as stream:stream.write(original);stream.flush();os.fsync(stream.fileno())
+        if after.is_symlink():raise ValueError('unsafe persistence record')
+        with after.open('w') as stream:stream.write(hashlib.sha256(target.read_bytes()).hexdigest());stream.flush();os.fsync(stream.fileno())
         with target.open('rb') as stream:os.fsync(stream.fileno())
         os.replace(target,NETWORK)
         fd=os.open(NETWORK.parent,os.O_RDONLY|os.O_DIRECTORY)
         try:os.fsync(fd)
         finally:os.close(fd)
+
+def restore_persisted():
+    if not BACKUP.exists():return
+    if BACKUP.is_symlink() or BACKUP.parent.is_symlink() or NETWORK.is_symlink():raise ValueError('unsafe recovery')
+    current=NETWORK.read_bytes();baseline=BACKUP.read_bytes()
+    if current==baseline:return
+    after=BACKUP.with_name('network.after-persist.sha256')
+    if after.is_symlink() or after.read_text().strip()!=hashlib.sha256(current).hexdigest():raise ValueError('network changed since persistence')
+    fd,name=tempfile.mkstemp(prefix='.home-net-restore.',dir=NETWORK.parent)
+    try:
+        with os.fdopen(fd,'wb') as stream:stream.write(baseline);stream.flush();os.fsync(stream.fileno())
+        if NETWORK.read_bytes()!=current:raise ValueError('network changed during recovery')
+        os.replace(name,NETWORK)
+    finally:Path(name).unlink(missing_ok=True)
 
 FAILOVER=Path('/etc/podkop-awg-failover.conf')
 WATCHER='/usr/bin/podkop-awg-failover'
@@ -152,9 +171,11 @@ def set_order(size):
 def main():
     os.umask(0o077)
     try:
-        if os.geteuid()!=0 or len(sys.argv)!=3:raise ValueError('invalid invocation')
-        if sys.argv[1]=="--order":set_order(sys.argv[2])
-        else:persist(sys.argv[1],sys.argv[2])
+        if os.geteuid()!=0:raise ValueError('invalid invocation')
+        if sys.argv[1:]==['--restore']:restore_persisted()
+        elif len(sys.argv)==3 and sys.argv[1]=='--order':set_order(sys.argv[2])
+        elif len(sys.argv)==3:persist(sys.argv[1],sys.argv[2])
+        else:raise ValueError('invalid invocation')
     except (OSError,ValueError,subprocess.SubprocessError):
         print('HOME NET: candidate persistence requires review',file=sys.stderr);return 1
     return 0

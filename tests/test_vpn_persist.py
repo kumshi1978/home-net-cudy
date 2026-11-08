@@ -39,6 +39,16 @@ class Persist(unittest.TestCase):
                 with self.assertRaises(ValueError):persist.persist('awg_backup2','0'*64)
                 self.assertEqual(network.read_bytes(),original)
                 persist.persist('awg_backup2',hashlib.sha256(CONF).hexdigest())
+                candidate=network.read_bytes()
+                persist.persist('awg_backup2',hashlib.sha256(CONF).hexdigest())
+                self.assertEqual(network.read_bytes(),candidate)
+                persist.restore_persisted()
+                self.assertEqual(network.read_bytes(),original)
+                # Restore refuses to erase an unrelated edit after a completed persistence.
+                network.write_bytes(candidate+b'unrelated edit')
+                with self.assertRaises(ValueError):persist.restore_persisted()
+                self.assertEqual(network.read_bytes(),candidate+b'unrelated edit')
+                network.write_bytes(candidate)
             self.assertEqual((backup/'baseline').read_bytes(),original)
             self.assertEqual(network.read_bytes(),original+b'candidate persisted\n')
 

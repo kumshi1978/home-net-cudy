@@ -126,8 +126,7 @@ probe() {
         END { exit (NR != 1 || bad) }
     ' || return 1
     if [ -n "$2" ]; then
-        country=$(curl -q -4 --noproxy '*' --interface "if!$1" --connect-timeout 5 \
-            --max-time 10 --max-filesize 128 -fsS https://ipinfo.io/country) || return 1
+        country=$(podkop-country-lookup "$1") || return 1
         [ "$country" = "$2" ] || return 1
     fi
 }
@@ -225,6 +224,7 @@ case "$verb:$#" in
             switch_to "$1"
         fi
         [ "$(active)" = "$1" ]
+        if [ -f "$3/network.before-persist" ]; then /usr/bin/home-net-vpn-persist.py --restore; fi
         awg syncconf "$2" "$3/target.conf"
         ;;
     check-restored:3)
