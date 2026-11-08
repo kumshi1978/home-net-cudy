@@ -157,7 +157,11 @@ def main():
         for path in (NETWORK,PODKOP,FAILOVER):
             if path.is_symlink() or path.parent.is_symlink(): raise ValueError('unsafe configuration')
         with LOCK.open('a') as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            for attempt in range(30):
+                try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB); break
+                except BlockingIOError:
+                    if attempt == 29: return 75
+                    time.sleep(1)
             apply(json.loads(sys.argv[1]))
     except (ValueError,KeyError,TypeError,OSError,subprocess.SubprocessError):
         print('HOME NET: slot rebinding stopped; inspect local recovery record',file=sys.stderr); return 1
