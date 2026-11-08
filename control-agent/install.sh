@@ -33,9 +33,9 @@ command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unava
 for file in cudy.py vpn-control-cudy.init prepare-slots.py; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
-echo '09cbf03174ea5fdf6b0ecf4f6adb0474ac1b12f45efbbbab02ededa9f474a7e1  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'c2ad7e23e1594088870c8e010b8b69e46854c1938b8af764841488e34019500c  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
 echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
-echo 'b808e0ba97f52fc3a4b242aba469e2f76739cc7c8c82fc7aa4b650b615ba63f2  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo '1fb81899dafbc0c7240c41cd9c61938627906c9ac429b749d2a14e1ea59af730  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/prepare-slots.py"
 sh -n "$work/vpn-control-cudy.init"
@@ -59,6 +59,10 @@ for file in /usr/sbin/vpn-control-cudy.py /usr/sbin/home-net-prepare-slots.py /e
     [ ! -L "$backup/$(basename "$file")" ] || fail 'unsafe backup path'
     [ ! -e "$file" ] || cp -p "$file" "$backup/$(basename "$file")"
 done
+# Controller files are installed under the shared lock, without touching network or routes.
+wget -q -T 60 -O "$work/install-three-slots.sh" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/install-three-slots.sh" || fail 'controller installer unavailable'
+echo 'b1836c79799e088691eae0ef39a84665129bcf0d38d9d928a960b14b9486cba7  '"$work/install-three-slots.sh" | sha256sum -c - || fail 'controller installer integrity failed'
+HOME_NET_CONTROL_REF="$ref" sh "$work/install-three-slots.sh" || fail 'controller upgrade requires review'
 # Existing credentials and any local AWG configuration are preserved.
 agent_temp=$(mktemp /usr/sbin/.vpn-control-cudy.XXXXXX)
 cp "$work/cudy.py" "$agent_temp"

@@ -75,7 +75,8 @@ def generated_key():
     return key
 
 
-def prepare(role=None):
+def prepare(role=None, backup2=False):
+    requested_slots = SLOTS + (('awg_backup2',) if backup2 else ())
     if role is not None and role not in ROLES:
         raise Blocked('invalid_role')
     if role is None:
@@ -94,7 +95,7 @@ def prepare(role=None):
             raise Blocked('pending_network_changes')
         original = NETWORK.read_bytes()
         commands, inventory = [], {}
-        for index, slot in enumerate(SLOTS):
+        for index, slot in enumerate(requested_slots):
             section = uci.get('network.' + slot)
             if section is not None and (section != 'interface' or uci.get('network.' + slot + '.proto') != 'amneziawg'):
                 raise Blocked('slot_name_conflict')
@@ -112,7 +113,7 @@ def prepare(role=None):
                              f"set network.{slot}.private_key='{generated_key()}'"]
             if managed and not address and role is not None:
                 # Reserved role addresses are distinct across all four managed routers.
-                address = f'10.8.1.{201 + 2 * ROLES.index(role) + index}/32'
+                address = f'10.8.1.{209 + ROLES.index(role) if slot == "awg_backup2" else 201 + 2 * ROLES.index(role) + index}/32'
                 if not created:
                     running = subprocess.run(['ip', 'link', 'show', 'dev', slot],
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode == 0
@@ -129,7 +130,7 @@ def prepare(role=None):
             runtime = subprocess.check_output(['ip', '-4', '-o', 'address', 'show'], stderr=subprocess.DEVNULL, timeout=5).decode()
             for line in runtime.splitlines():
                 fields = line.split()
-                if len(fields) >= 4 and fields[1].split('@')[0] not in SLOTS:
+                if len(fields) >= 4 and fields[1].split('@')[0] not in requested_slots:
                     network = ipaddress.IPv4Interface(fields[3]).network
                     if any(ipaddress.IPv4Address(address) in network for address in addresses):
                         raise Blocked('local_address_conflict')
@@ -149,7 +150,7 @@ def prepare(role=None):
                 if not backup.exists():
                     atomic_write(backup, original)
                 atomic_write(NETWORK, target.read_bytes())
-        return {'phase': 'ready' if len(addresses) == 2 else 'awaiting_role',
+        return {'phase': 'ready' if len(addresses) == len(requested_slots) else 'awaiting_role',
                 'slots': inventory, 'changed': bool(commands), 'at': int(time.time())}
 
 
@@ -158,10 +159,10 @@ def main():
     if os.geteuid() != 0:
         return 1
     try:
-        if len(sys.argv) > 2:
+        if len(sys.argv) > 3 or (len(sys.argv) == 3 and sys.argv[2] != "--backup2"):
             raise Blocked('invalid_role')
-        role = sys.argv[1] if len(sys.argv) == 2 else None
-        status = prepare(role)
+        role = sys.argv[1] if len(sys.argv) >= 2 else None
+        status = prepare(role, backup2=len(sys.argv) == 3)
     except Blocked as error:
         status = {'phase': 'blocked', 'reason': str(error), 'at': int(time.time())}
     except (OSError, ValueError, subprocess.SubprocessError):
