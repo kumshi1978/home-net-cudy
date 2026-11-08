@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -68,6 +69,16 @@ def network_commands(mapping, shown):
         result.append('rename '+name+'=hn_peer_'+str(index))
     for index,(name,target) in enumerate(managed): result.append('rename network.hn_peer_'+str(index)+'=home_net_'+target)
     for index,source in enumerate(mapping): result.append('rename network.hn_rebind_'+str(index)+'='+inverse[source])
+    # OpenWrt's AmneziaWG protocol reads awg_jc/awg_h1/etc, not bare jc/h1.
+    options={line.split('=',1)[0]:line.split('=',1)[1] for line in lines if '=' in line}
+    for target,source in mapping.items():
+        for name in ('jc','jmin','jmax','s1','s2','s3','s4','h1','h2','h3','h4','i1','i2','i3','i4','i5'):
+            alias='network.'+source+'.'+name;canonical='network.'+source+'.awg_'+name
+            if alias not in options:continue
+            value,=shlex.split(options[alias])
+            if any(char in value for char in "'\n\r"):raise ValueError('unsafe legacy option')
+            if canonical in options and shlex.split(options[canonical]) != [value]:raise ValueError('conflicting obfuscation options')
+            result.extend(["set network."+target+'.awg_'+name+"='"+value+"'",'delete network.'+target+'.'+name])
     return result
 
 def atomic(path, content):
@@ -125,7 +136,7 @@ def apply(spec):
     for path,content in originals.items(): (backup/path.name).write_bytes(content)
     (backup/'request.json').write_text(json.dumps(spec))
     atomic(ROOT/'rebind-pending',backup.name.encode())
-    changed=[slot for slot,source in spec['mapping'].items() if slot != source]
+    changed=[slot for slot,source in spec['mapping'].items() if slot != source or any(line.startswith('network.'+source+'.'+name+'=') for line in shown.splitlines() for name in ('jc','jmin','jmax','s1','s2','s3','s4','h1','h2','h3','h4','i1','i2','i3','i4','i5'))]
     try:
         for path,content in originals.items():
             if path.read_bytes() != content: raise ValueError('configuration changed')
@@ -133,9 +144,16 @@ def apply(spec):
         if changed: activate(changed)
         for slot,source in spec['mapping'].items():
             if observe(slot) != spec['expected'][source]: raise ValueError('post-apply profile mismatch')
-        serve()
-        exit_ip=command('curl','-q','-4','--noproxy','*','--interface','if!'+target,'--connect-timeout','5','--max-time','15','--max-filesize','128','-fsS','https://ifconfig.me/ip').decode().strip()
-        if exit_ip != spec['expected'][spec['selected']]['host']: raise ValueError('selected tunnel probe failed')
+        if spec['active'] in changed or target != spec['active']:serve()
+        else:command('home-net-install-verify','services')
+        for slot,source in spec['mapping'].items():
+            good=False
+            for url in ('https://ifconfig.me/ip','https://api.ipify.org'):
+                try:
+                    exit_ip=command('curl','-q','-4','--noproxy','*','--interface','if!'+slot,'--connect-timeout','5','--max-time','10','--max-filesize','128','-fsS',url).decode().strip()
+                    if exit_ip == spec['expected'][source]['host']:good=True;break
+                except subprocess.SubprocessError:pass
+            if not good:raise ValueError('tunnel probe failed after rebinding')
         command('/etc/init.d/podkop-awg-failover','restart')
         (backup/'phase').write_text('applied\n')
         (ROOT/'rebind-pending').unlink()

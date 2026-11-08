@@ -61,7 +61,7 @@ for file in /usr/sbin/vpn-control-cudy.py /usr/sbin/home-net-prepare-slots.py /e
 done
 # Controller files are installed under the shared lock, without touching network or routes.
 wget -q -T 60 -O "$work/install-three-slots.sh" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/install-three-slots.sh" || fail 'controller installer unavailable'
-echo 'f4b6486cd97c84f54f0b07b91c766310793a4dc0386fc15b21fe15cb5f73e4f9  '"$work/install-three-slots.sh" | sha256sum -c - || fail 'controller installer integrity failed'
+echo 'cab66fa0fb59f86c4214d7a2e0e0e420b45f82d39a91ff67558340ae63af307f  '"$work/install-three-slots.sh" | sha256sum -c - || fail 'controller installer integrity failed'
 HOME_NET_CONTROL_REF="$ref" sh "$work/install-three-slots.sh" || fail 'controller upgrade requires review'
 # Existing credentials and any local AWG configuration are preserved.
 agent_temp=$(mktemp /usr/sbin/.vpn-control-cudy.XXXXXX)

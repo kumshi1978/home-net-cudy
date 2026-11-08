@@ -14,7 +14,7 @@ import tempfile
 NETWORK=Path('/etc/config/network')
 BACKUP=Path('/etc/home-net/vpn/transaction/backup/network.before-persist')
 SLOTS=('awg_main','awg_backup','awg_backup2')
-INTERFACE={'PrivateKey':'private_key','ListenPort':'listen_port',**{k:k.lower() for k in ('Jc','Jmin','Jmax','S1','S2','S3','S4','H1','H2','H3','H4','I1','I2','I3','I4','I5')}}
+INTERFACE={'PrivateKey':'private_key','ListenPort':'listen_port',**{k:'awg_'+k.lower() for k in ('Jc','Jmin','Jmax','S1','S2','S3','S4','H1','H2','H3','H4','I1','I2','I3','I4','I5')}}
 PEER={'PublicKey':'public_key','PresharedKey':'preshared_key','PersistentKeepalive':'persistent_keepalive','AdvancedSecurity':'advanced_security'}
 
 def key(value):

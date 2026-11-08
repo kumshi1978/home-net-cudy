@@ -35,6 +35,14 @@ class Rebind(unittest.TestCase):
         self.assertIn('rename network.hn_rebind_1=awg_main',commands)
         with self.assertRaises(ValueError):m.network_commands(spec['mapping'],text+'network.hn_rebind_0=interface\n')
 
+    def test_legacy_obfuscation_is_saved_using_real_openwrt_field_names(self):
+        text="network.awg_backup2.jc='4'\nnetwork.awg_backup2.h1='123456'\n"
+        commands=m.network_commands({'awg_main':'awg_main','awg_backup':'awg_backup','awg_backup2':'awg_backup2'},text)
+        self.assertIn("set network.awg_backup2.awg_jc='4'",commands)
+        self.assertIn("set network.awg_backup2.awg_h1='123456'",commands)
+        self.assertIn('delete network.awg_backup2.jc',commands)
+        with self.assertRaises(ValueError):m.network_commands({'awg_main':'awg_main'},"network.awg_main.jc='4'\nnetwork.awg_main.awg_jc='5'\n")
+
     def run_case(self,fail=False,stale=False):
         spec=fixture()
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,7 +58,9 @@ class Rebind(unittest.TestCase):
                 if args[:2]==('uci','changes'):return b''
                 if args[:3]==('uci','-q','get'):return b'awg_backup'
                 if args[:4]==('uci','-q','-X','show'):return b'network.awg_main=interface\nnetwork.awg_backup=interface\n'
-                if args[0]=='curl':return b'192.0.2.99' if fail else b'192.0.2.2'
+                if args[0]=='curl':
+                    slot=next(arg[3:] for arg in args if arg.startswith('if!'))
+                    return b'192.0.2.99' if fail else spec['expected'][spec['mapping'][slot]]['host'].encode()
                 return b''
             with patch.multiple(m,ROOT=root,NETWORK=network,PODKOP=podkop,FAILOVER=failover),patch.object(m,'command',side_effect=command),patch.object(m,'observe',side_effect=observe),patch.object(m,'edited',side_effect=lambda path,cmd:(path.name+' changed').encode()),patch.object(m,'activate') as activate,patch.object(m,'serve'):
                 if fail or stale:

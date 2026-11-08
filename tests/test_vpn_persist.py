@@ -63,6 +63,8 @@ class Persist(unittest.TestCase):
                 self.assertEqual(args,['batch'])
                 text=input.decode();self.assertNotIn('delete network.lan',text);self.assertNotIn('set network.awg_main',text)
                 self.assertIn("set network.awg_backup2.auto='1'",text)
+                self.assertIn("set network.awg_backup2.awg_jc='4'",text)
+                self.assertNotIn("set network.awg_backup2.jc=",text)
                 self.assertIn("endpoint_host='192.0.2.3'",text)
                 (Path(directory)/'network').write_bytes(original+b'candidate persisted\n');return b''
             with patch.object(persist,'NETWORK',network),patch.object(persist,'BACKUP',backup/'baseline'),patch.object(persist,'uci',side_effect=uci),patch.object(persist.subprocess,'check_output',return_value=CONF):
