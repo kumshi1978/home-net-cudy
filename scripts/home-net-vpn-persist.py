@@ -115,19 +115,23 @@ def restore_persisted():
 
 FAILOVER=Path('/etc/podkop-awg-failover.conf')
 WATCHER='/usr/bin/podkop-awg-failover'
+SECTION_FILE=Path('/etc/home-net/vpn/podkop-section')
 ORDER_APPLIED=Path('/etc/home-net/vpn/order-applied.json')
 
-def set_order(size):
-    if size not in ('2','3') or FAILOVER.is_symlink() or not FAILOVER.is_file():raise ValueError('invalid policy')
+def set_order(value):
+    order=value.split(',');size=str(len(order))
+    if len(order) not in (2,3) or len(set(order))!=len(order) or not set(order)<=set(SLOTS) or FAILOVER.is_symlink() or not FAILOVER.is_file():raise ValueError('invalid policy')
+    with Path(WATCHER).open() as stream:prefix=stream.read(512)
+    if 'if [ "${1:-}" = --capabilities ]; then' not in prefix:raise ValueError('legacy failover cannot negotiate capabilities')
     capabilities=subprocess.check_output([WATCHER,'--capabilities'],stderr=subprocess.DEVNULL,timeout=5).decode().split()
     if list(capabilities)!=list(SLOTS):raise ValueError('unsupported failover')
-    section=Path('/etc/home-net/vpn/podkop-section').read_text().strip()
+    section=SECTION_FILE.read_text().strip()
     if not re.fullmatch('[A-Za-z0-9_]+',section):raise ValueError('invalid podkop section')
     active=uci(['-q','get','podkop.'+section+'.interface']).decode().strip()
-    if active not in SLOTS or size=='2' and active=='awg_backup2':raise ValueError('active reserve must remain enabled')
-    if size=='3':
+    if active not in order:raise ValueError('active reserve must remain enabled')
+    if size in ('2','3'):
         hosts=[];addresses=[]
-        for slot in SLOTS:
+        for slot in order:
             lines=subprocess.check_output(['awg','show',slot,'endpoints'],stderr=subprocess.DEVNULL,timeout=5).decode().splitlines()
             if len(lines)!=1:raise ValueError('ambiguous peer')
             host=lines[0].split()[1].rsplit(':',1)[0];ipaddress.IPv4Address(host);hosts.append(host)
@@ -136,15 +140,15 @@ def set_order(size):
             address=ipaddress.IPv4Interface(lines[0].split()[3])
             if address.network.prefixlen!=32:raise ValueError('invalid address')
             addresses.append(str(address.ip))
-        if len(set(hosts))!=3 or len(set(addresses))!=3:raise ValueError('duplicate reserve')
+        if len(set(hosts))!=int(size) or len(set(addresses))!=int(size):raise ValueError('duplicate reserve')
     original=FAILOVER.read_bytes()
-    desired="BACKUP2_AWG='awg_backup2'" if size=='3' else "BACKUP2_AWG=''"
-    lines=original.decode().splitlines();newlines=[line for line in lines if not line.startswith('BACKUP2_AWG=')]+[desired]
+    desired=["MAIN_AWG='"+order[0]+"'","BACKUP_AWG='"+order[1]+"'","BACKUP2_AWG='"+(order[2] if len(order)==3 else '')+"'"]
+    lines=original.decode().splitlines();newlines=[line for line in lines if not line.startswith(('MAIN_AWG=','BACKUP_AWG=','BACKUP2_AWG='))]+desired
     replacement=('\n'.join(newlines)+'\n').encode()
     digest=hashlib.sha256(replacement).hexdigest()
     try:applied=json.loads(ORDER_APPLIED.read_text())
     except (OSError,ValueError):applied={}
-    if replacement==original and applied=={'size':int(size),'digest':digest}:return
+    if replacement==original and applied=={'size':int(size),'order':order,'digest':digest}:return
     fd,name=tempfile.mkstemp(prefix='.home-net-order.',dir=FAILOVER.parent)
     try:
         with os.fdopen(fd,'wb') as stream:stream.write(replacement);stream.flush();os.fsync(stream.fileno())
@@ -163,7 +167,7 @@ def set_order(size):
             raise
         if ORDER_APPLIED.is_symlink() or ORDER_APPLIED.parent.is_symlink():raise ValueError('unsafe acknowledgement')
         fd,marker=tempfile.mkstemp(prefix='.home-net-order-ack.',dir=ORDER_APPLIED.parent)
-        with os.fdopen(fd,'w') as stream:json.dump({'size':int(size),'digest':digest},stream);stream.flush();os.fsync(stream.fileno())
+        with os.fdopen(fd,'w') as stream:json.dump({'size':int(size),'order':order,'digest':digest},stream);stream.flush();os.fsync(stream.fileno())
         os.replace(marker,ORDER_APPLIED)
     finally:
         Path(name).unlink(missing_ok=True)

@@ -256,16 +256,20 @@ def router_topology():
         result["preparation"] = json.loads((STATE.parent / "slot-preparation.json").read_text())
     except (OSError, ValueError):
         pass
+    result['failover_slots']=[]
     try:
-        result["failover_slots"] = read("/usr/bin/podkop-awg-failover", "--capabilities").split()
-    except (OSError,ValueError,subprocess.SubprocessError):
-        result["failover_slots"] = []
+        watcher=Path('/usr/bin/podkop-awg-failover')
+        with watcher.open() as stream:prefix=stream.read(512)
+        if 'if [ "${1:-}" = --capabilities ]; then' in prefix:
+            result['failover_slots']=read(str(watcher),'--capabilities').split()
+    except (OSError,ValueError,subprocess.SubprocessError):pass
     result["order_size"] = 0
     try:
         acknowledgement = json.loads((STATE.parent / "order-applied.json").read_text())
         digest = hashlib.sha256(Path("/etc/podkop-awg-failover.conf").read_bytes()).hexdigest()
         if acknowledgement.get("digest") == digest and acknowledgement.get("size") in (2,3):
             result["order_size"] = acknowledgement["size"]
+            result["order"] = acknowledgement.get("order",[])
     except (OSError,ValueError):
         pass
     result["prepared_revision"] = json.loads(CONFIG.read_text()).get("prepared_revision", 0) if CONFIG.exists() else 0
@@ -296,7 +300,10 @@ def verify_plan(config,response):
     if (type(plan.get("revision")) is not int or plan["revision"] < config.get("prepared_revision", 0)
             or type(plan.get("expires")) is not int or not time.time() < plan["expires"] <= time.time() + 1860
             or plan.get("slots") not in (["awg_main","awg_backup"], ["awg_main","awg_backup","awg_backup2"])
-            or "order_size" in plan and (type(plan["order_size"]) is not int or plan["order_size"]!=len(plan["slots"]))):
+            or ('order_size' in plan)!=('order' in plan)
+            or 'order' in plan and (not isinstance(plan['order'],list) or len(plan['order']) not in (2,3)
+                or len(set(plan['order']))!=len(plan['order']) or not set(plan['order'])<=set(plan['slots'])
+                or type(plan['order_size']) is not int or plan['order_size']!=len(plan['order']))):
         raise ValueError("invalid slot plan")
     return plan
 
@@ -342,7 +349,7 @@ def poll_once():
                 if config.get("prepared_revision") != plan["revision"]:
                     config["prepared_revision"] = plan["revision"]; save_config(config)
         if plan and plan.get("order_size") in (2,3):
-            if not helper("set-order", str(plan["order_size"])):
+            if not helper("set-order", ",".join(plan["order"])):
                 raise ValueError("ordered failover is not ready")
         if response["job"] is None:
             return

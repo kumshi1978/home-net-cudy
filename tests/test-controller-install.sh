@@ -8,7 +8,7 @@ mkdir -p "$FIXTURE/etc/home-net/vpn/transaction" "$FIXTURE/usr/bin" "$TMP/bin"
 printf 'verified\n' > "$FIXTURE/etc/home-net/vpn/transaction/phase"
 printf 'transaction baseline\n' > "$FIXTURE/etc/home-net/vpn/transaction/metadata"
 printf 'unchanged network\n' > "$TMP/network"
-printf "INSTALLED_VERSION='1.5.0'\n" > "$FIXTURE/etc/podkop-awg-failover.conf"
+printf "INSTALLED_VERSION='1.5.0'\nPODKOP_SECTION='main'\n" > "$FIXTURE/etc/podkop-awg-failover.conf"
 python3 - "$ROOT/control-agent/install-three-slots.sh" "$TMP/install" "$FIXTURE" "$TMP/maintenance" <<'PY'
 import sys
 from pathlib import Path
@@ -21,6 +21,11 @@ PY
 cat > "$TMP/bin/id" <<'MOCK'
 #!/bin/sh
 echo 0
+MOCK
+cat > "$TMP/bin/uci" <<'MOCK'
+#!/bin/sh
+[ "$*" = '-q get podkop.main' ] || exit 1
+echo section
 MOCK
 cat > "$TMP/bin/wget" <<'MOCK'
 #!/bin/sh
@@ -39,6 +44,7 @@ printf 'verified\n' | cmp - "$FIXTURE/etc/home-net/vpn/transaction/phase"
 printf 'transaction baseline\n' | cmp - "$FIXTURE/etc/home-net/vpn/transaction/metadata"
 printf 'unchanged network\n' | cmp - "$TMP/network"
 grep -Fxq 1.5.0 "$FIXTURE/etc/home-net/vpn/failover-lock-version"
+grep -Fxq main "$FIXTURE/etc/home-net/vpn/podkop-section"
 run > "$TMP/retry"
 printf 'custom adapter\n' > "$FIXTURE/etc/home-net/vpn/adapter"
 if run > "$TMP/rejected" 2>&1; then echo 'custom adapter must be preserved' >&2;exit 1;fi

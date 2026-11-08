@@ -26,20 +26,20 @@ if [ -f "$config/adapter" ]; then
 fi
 if [ -f /usr/bin/home-net-vpn-router ]; then
     current=$(sha256sum /usr/bin/home-net-vpn-router | cut -d ' ' -f1)
-    case "$current" in 45649ea506ec2e3982c2a2d25e084e649c932605652021bc67aaae58924d66e3|f882f28f83a698c333e85d062f92fde86a19b4eacf0a5b081bee64d434675a60|f7942ee4d2a06421e477ed1ec1477a4fe9facdec4b2596cc8df275b30cad50ba) ;;
+    case "$current" in b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743|f882f28f83a698c333e85d062f92fde86a19b4eacf0a5b081bee64d434675a60|f7942ee4d2a06421e477ed1ec1477a4fe9facdec4b2596cc8df275b30cad50ba) ;;
         *) fail 'custom controller preserved; review required' ;; esac
 fi
 work=$(mktemp -d /tmp/home-net-controller.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' HUP INT TERM
 wget -q -T 60 -O "$work/home-net-vpn-router" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-router" || fail 'download failed'
-echo '45649ea506ec2e3982c2a2d25e084e649c932605652021bc67aaae58924d66e3  '"$work/home-net-vpn-router" | sha256sum -c - || fail 'integrity mismatch'
+echo 'b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743  '"$work/home-net-vpn-router" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-cudy-adapter" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-cudy-adapter" || fail 'download failed'
 echo '7fb7f1464b908e4dd8dad9c003bd0b228fca839c04b2cd5fb6df4395ae58d0ea  '"$work/home-net-vpn-cudy-adapter" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-manifest-validate" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-manifest-validate" || fail 'download failed'
 echo '9d99142b237ebf221b8acd18604601dc954c0e71bb42f9f06ef700698bceb745  '"$work/home-net-vpn-manifest-validate" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-persist.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-persist.py" || fail 'download failed'
-echo 'ea765dd54949cf769d70435b8b9908985dc8313a7372b6796292d5cc2cecc18f  '"$work/home-net-vpn-persist.py" | sha256sum -c - || fail 'integrity mismatch'
+echo '98454b13b657d7ce7ffd5986d38cb91acf8ccadf17e3aaa455115f5d25fac29b  '"$work/home-net-vpn-persist.py" | sha256sum -c - || fail 'integrity mismatch'
 for file in home-net-vpn-router home-net-vpn-cudy-adapter home-net-vpn-manifest-validate; do sh -n "$work/$file" || fail 'invalid shell'; done
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/home-net-vpn-persist.py"
 backup=/etc/home-net/controller-backups
@@ -59,6 +59,15 @@ install_atomic "$work/home-net-vpn-persist.py" /usr/bin/home-net-vpn-persist.py
 install_atomic "$work/home-net-vpn-manifest-validate" /usr/bin/home-net-vpn-manifest-validate
 install_atomic "$work/home-net-vpn-router" /usr/bin/home-net-vpn-router
 install_atomic "$work/home-net-vpn-cudy-adapter" "$config/adapter"
+if [ ! -e "$config/podkop-section" ]; then
+    # Reuse the local section already selected by the common Failover installer.
+    # No panel-supplied section name and no network changes are accepted here.
+    section=$(sed -n "s/^PODKOP_SECTION='\([A-Za-z0-9_]*\)'$/\1/p" /etc/podkop-awg-failover.conf)
+    case "$section" in ''|*[!A-Za-z0-9_]*) fail 'local Podkop section requires review' ;; esac
+    uci -q get "podkop.$section" >/dev/null || fail 'local Podkop section missing'
+    temporary=$(mktemp "$config/.podkop-section.XXXXXX")
+    printf '%s\n' "$section" > "$temporary"; chmod 0600 "$temporary"; mv "$temporary" "$config/podkop-section"
+fi
 if grep -Fxq "INSTALLED_VERSION='1.5.0'" /etc/podkop-awg-failover.conf; then
     temporary=$(mktemp "$config/.lock-contract.XXXXXX")
     printf '%s\n' 1.5.0 > "$temporary"; chmod 0600 "$temporary"; mv "$temporary" "$config/failover-lock-version"

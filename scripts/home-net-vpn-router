@@ -185,7 +185,7 @@ fi
 
 if [ "$action" = set-order ]; then
     [ ! -e "$state" ] || fail "transaction still open"
-    case "$2" in 2|3) ;; *) fail "invalid order size";; esac
+    case "$2" in ''|*[!a-z0-9_,]*) fail "invalid order";; esac
     "$base/home-net-vpn-persist.py" --order "$2"
     exit $?
 fi

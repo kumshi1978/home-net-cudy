@@ -33,7 +33,7 @@ command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unava
 for file in cudy.py vpn-control-cudy.init prepare-slots.py; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
-echo 'c2ad7e23e1594088870c8e010b8b69e46854c1938b8af764841488e34019500c  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
+echo 'b6bb86333d8658ae07d24d3f9e826758446d3e147884bdafca42b5c26a63905a  '"$work/cudy.py" | sha256sum -c - || fail 'agent integrity check failed'
 echo 'bd78f815539c5bc3fb56537620cf9df899aca3010794d4aa410af64a993fca5f  '"$work/vpn-control-cudy.init" | sha256sum -c - || fail 'agent integrity check failed'
 echo '1fb81899dafbc0c7240c41cd9c61938627906c9ac429b749d2a14e1ea59af730  '"$work/prepare-slots.py" | sha256sum -c - || fail 'agent integrity check failed'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/cudy.py"
@@ -61,7 +61,7 @@ for file in /usr/sbin/vpn-control-cudy.py /usr/sbin/home-net-prepare-slots.py /e
 done
 # Controller files are installed under the shared lock, without touching network or routes.
 wget -q -T 60 -O "$work/install-three-slots.sh" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/install-three-slots.sh" || fail 'controller installer unavailable'
-echo 'b1836c79799e088691eae0ef39a84665129bcf0d38d9d928a960b14b9486cba7  '"$work/install-three-slots.sh" | sha256sum -c - || fail 'controller installer integrity failed'
+echo 'cf42bc8d43ec042c8f912d20610ca3f71190a0d57eb96b8ef87e40064ebb6973  '"$work/install-three-slots.sh" | sha256sum -c - || fail 'controller installer integrity failed'
 HOME_NET_CONTROL_REF="$ref" sh "$work/install-three-slots.sh" || fail 'controller upgrade requires review'
 # Existing credentials and any local AWG configuration are preserved.
 agent_temp=$(mktemp /usr/sbin/.vpn-control-cudy.XXXXXX)
