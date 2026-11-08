@@ -6,7 +6,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "root required"
 action=${1:-}
 case "$action:$#" in
-    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1) ;;
+    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1|capabilities:1|accept:1) ;;
     *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | prepare-upload ID COUNTRY | prepare-upload-target ID COUNTRY SLOT ADDRESS | verify | promote | rollback | status" ;;
 esac
 
@@ -16,6 +16,12 @@ state=$config/transaction
 adapter=$config/adapter
 maintenance=/var/run/home-net-vpn-maintenance.lock
 boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || fail "boot identifier unavailable"
+
+if [ "$action" = capabilities ]; then
+    [ -x "$base/home-net-vpn-persist.py" ] || exit 1
+    "$adapter" capabilities
+    exit $?
+fi
 
 if [ "$action" = status ]; then
     current=idle
@@ -61,7 +67,7 @@ if [ "$action" = prepare-upload ] || [ "$action" = prepare-upload-target ]; then
     IFS= read -r header <"$tmp/upload.age" || fail "invalid encrypted upload"
     [ "$header" = 'age-encryption.org/v1' ] || fail "invalid encrypted upload"
     if [ "$action" = prepare-upload-target ]; then
-        case "$4" in awg_main|awg_backup) ;; *) fail "invalid requested slot";; esac
+        case "$4" in awg_main|awg_backup|awg_backup2) ;; *) fail "invalid requested slot";; esac
         case "$5" in ''|*[!0-9./]*) fail "invalid requested address";; esac
         requested_slot=$4
         requested_address=$5
@@ -89,7 +95,7 @@ phase() {
 
 active_slot() {
     active=$("$adapter" active 2>/dev/null) || fail "cannot determine active slot"
-    case "$active" in awg_main|awg_backup) ;; *) fail "invalid active slot";; esac
+    case "$active" in awg_main|awg_backup|awg_backup2) ;; *) fail "invalid active slot";; esac
 }
 
 restore() {
@@ -109,7 +115,8 @@ if [ "$action" = prepare ] || [ "$action" = prepare-upload ]; then
     esac
     if [ "$action" = prepare-upload ]; then
         active_slot
-        case "$active" in awg_main) slot=awg_backup ;; awg_backup) slot=awg_main ;; esac
+        if [ -n "${requested_slot:-}" ]; then slot=$requested_slot
+        else case "$active" in awg_main) slot=awg_backup ;; awg_backup|awg_backup2) slot=awg_main ;; esac; fi
         mv "$tmp/upload.age" "$tmp/$router.conf.age"
     else
         bundle=$2
@@ -155,6 +162,7 @@ if [ "$action" = prepare ] || [ "$action" = prepare-upload ]; then
     # Publish the complete rollback record before changing any interface.
     record=$(mktemp -d "$config/.record.XXXXXX")
     mkdir "$record/backup"
+    digest "$tmp/$router.conf.age" >"$record/payload.sha256"
     run_adapter snapshot "$previous" "$slot" "$record/backup" || fail "backup failed"
     printf '%s\n' "$previous" "$slot" "$country" >"$record/metadata"
     if [ "$action" = prepare-upload ]; then printf '%s\n' "$deployment" >"$record/deployment-id"; fi
@@ -185,9 +193,9 @@ fi
     read -r slot
     read -r country
 } <"$state/metadata"
-case "$previous:$slot" in awg_main:awg_backup|awg_backup:awg_main) ;;
-    *) fail "invalid rollback metadata";;
-esac
+case "$previous" in awg_main|awg_backup|awg_backup2) ;; *) fail "invalid rollback metadata";; esac
+case "$slot" in awg_main|awg_backup|awg_backup2) ;; *) fail "invalid rollback metadata";; esac
+[ "$previous" != "$slot" ] || fail "invalid rollback metadata"
 case "$country" in [A-Z][A-Z]) ;; *) fail "invalid rollback metadata";; esac
 
 case "$action" in
@@ -198,6 +206,20 @@ case "$action" in
         [ "$active" = "$previous" ] || fail "active slot changed"
         run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
         phase verified
+        ;;
+    accept)
+        [ "$current" = verified ] || fail "verify required"
+        active_slot
+        [ "$active" = "$previous" ] || fail "active slot changed"
+        run_adapter verify "$previous" "$slot" "$country" || fail "candidate verification failed"
+        run_adapter persist "$previous" "$slot" || fail "candidate persistence failed"
+        phase accepted
+        [ ! -L "$config/completed" ] || fail "unsafe completed path"
+        mkdir -p "$config/completed"
+        completed=$(cat "$state/deployment-id")
+        case "$completed" in ''|*[!A-Za-z0-9._-]*) fail "invalid deployment id";; esac
+        [ ! -e "$config/completed/$completed" ] || fail "completed record exists"
+        mv "$state" "$config/completed/$completed"
         ;;
     promote)
         [ "$current" = verified ] || fail "verify required"

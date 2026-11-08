@@ -45,6 +45,8 @@ case "$1" in
     snapshot) cp candidate "$4/candidate" ;;
     stage) cp "$4" candidate; test ! -e fail-stage ;;
     verify) test "$(cat active)" = "$2" && test "$4" = DE && test ! -e fail-verify ;;
+    persist) touch persisted ;;
+    capabilities) echo "awg_main awg_backup awg_backup2" ;;
     promote) echo "$3" >active ;;
     check-promoted) test ! -e fail-promote ;;
     restore) cp "$4/candidate" candidate; echo "$2" >active ;;
@@ -60,6 +62,7 @@ chmod +x "$tmp/config/adapter" "$tmp/age"
 cat >"$tmp/ip" <<'EOF'
 #!/bin/sh
 case "$6" in
+    awg_backup2) address=10.8.1.210/32 ;;
     awg_backup) address=10.8.1.13/32 ;;
     awg_main)
         [ ! -e "$TEST_CONFIG/no-active-address" ] || exit 0
@@ -192,4 +195,19 @@ if [ -f "$TEST_CONFIG/WATCH.lock" ]; then
     done
     echo 'PASS: failover 1.4.2 and HOME NET share exclusive maintenance'
 fi
+# A verified third reserve is accepted without switching the active path.
+mv "$TEST_CONFIG/transaction" "$tmp/previous-upload"
+echo awg_main > "$TEST_CONFIG/active"
+run prepare-upload-target third-reserve DE awg_backup2 10.8.1.210/32 < "$tmp/upload"
+reject accept
+run verify
+run accept
+test "$(cat "$TEST_CONFIG/active")" = awg_main
+test ! -e "$TEST_CONFIG/transaction"
+test -f "$TEST_CONFIG/persisted"
+test "$(cat "$TEST_CONFIG/completed/third-reserve/phase")" = accepted
+test "$(cat "$TEST_CONFIG/completed/third-reserve/payload.sha256")" = "$(sha256sum < "$tmp/upload" | cut -d ' ' -f 1)"
+run status | grep -Fq "TRANSACTION_STATE='idle'"
+echo 'PASS: third-slot verification and acceptance preserve active VPN and archive rollback'
+
 echo 'PASS: router lifecycle, maintenance contention and reboot fencing'

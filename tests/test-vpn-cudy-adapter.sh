@@ -16,6 +16,7 @@ case "${0##*/}:$1" in
     uci:-q)
         case "$3" in *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
+    ip:link) exit 0 ;;
     awg:showconf) cat "$TEST/$2" ;;
     awg:syncconf) cp "$3" "$TEST/$2" ;;
     awg:show)
@@ -43,7 +44,7 @@ case "${0##*/}:$1" in
 esac
 EOF
 chmod +x "$tmp/bin/mock"
-for cmd in ubus uci awg curl pidof timeout home-net-install-verify sleep; do
+for cmd in ubus uci awg curl pidof timeout home-net-install-verify sleep ip; do
     cp "$tmp/bin/mock" "$tmp/bin/$cmd"
 done
 export PATH="$tmp/bin:$PATH"

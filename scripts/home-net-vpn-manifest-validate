@@ -51,7 +51,7 @@ case "${COUNTRY:-}" in
 esac
 
 case "${TARGET_SLOT:-}" in
-    awg_main|awg_backup) ;;
+    awg_main|awg_backup|awg_backup2) ;;
     *) fail "TARGET_SLOT must be awg_main or awg_backup" ;;
 esac
 

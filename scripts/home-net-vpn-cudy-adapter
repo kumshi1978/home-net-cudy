@@ -7,9 +7,13 @@ config=/etc/home-net/vpn
 backup=$config/transaction/backup
 verb=$1
 shift
+if [ "$verb" = capabilities ]; then
+    printf '%s\n' 'awg_main awg_backup awg_backup2'
+    exit 0
+fi
 
 slot() {
-    case "$1" in awg_main|awg_backup) ;; *) return 1 ;; esac
+    case "$1" in awg_main|awg_backup|awg_backup2) ;; *) return 1 ;; esac
 }
 
 quiescent() {
@@ -157,6 +161,19 @@ case "$verb:$#" in
         slot "$1"; slot "$2"
         [ "$(active)" = "$1" ]
         healthy
+        if ! ip link show dev "$2" >/dev/null 2>&1; then
+            [ "$(uci -q get "network.$2.proto")" = amneziawg ]
+            [ "$(uci -q get "network.$2.auto")" = 0 ]
+            [ "$(uci -q get "network.$2.defaultroute")" = 0 ]
+            [ "$(uci -q get "network.$2.peerdns")" = 0 ]
+            # An existing disabled peer may carry unknown routes; do not start it blindly.
+            ! uci -q show network | grep -q "=amneziawg_$2$"
+            : >"$3/target-was-down"
+            if ! timeout 15 ifup "$2" || ! awg showconf "$2" >/dev/null; then
+                timeout 15 ifdown "$2" || true
+                exit 1
+            fi
+        fi
         awg showconf "$2" >"$3/target.conf"
         [ -s "$3/target.conf" ]
         conf=$(cat "$3/target.conf")
@@ -178,6 +195,12 @@ case "$verb:$#" in
         matches_candidate "$2"
         probe "$2" "$3"
         healthy
+        ;;
+    persist:2)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        matches_candidate "$2"
+        /usr/bin/home-net-vpn-persist.py "$2" "$(cat "$backup/candidate.sha256")"
         ;;
     promote:2)
         slot "$1"; slot "$2"
@@ -208,6 +231,7 @@ case "$verb:$#" in
         slot "$1"; slot "$2"
         [ "$(active)" = "$1" ]
         [ "$(fingerprint "$2")" = "$(cat "$3/baseline.sha256")" ]
+        if [ -f "$3/target-was-down" ]; then timeout 15 ifdown "$2"; fi
         probe "$1" ""
         healthy
         ;;
