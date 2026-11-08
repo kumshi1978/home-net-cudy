@@ -153,6 +153,18 @@ matches_candidate() {
 quiescent
 case "$verb:$#" in
     active:0) active ;;
+    prepared-address:2)
+        slot "$1"
+        [ "$(active)" != "$1" ]
+        ! ip link show dev "$1" >/dev/null 2>&1
+        [ "$(uci -q get "network.$1.proto")" = amneziawg ]
+        [ "$(uci -q get "network.$1.home_net_prepared")" = 1 ]
+        [ "$(uci -q get "network.$1.auto")" = 0 ]
+        [ "$(uci -q get "network.$1.defaultroute")" = 0 ]
+        [ "$(uci -q get "network.$1.peerdns")" = 0 ]
+        [ "$(uci -q get "network.$1.addresses")" = "$2" ]
+        ! uci -q show network | grep -q "=amneziawg_$1$"
+        ;;
     validate:2)
         slot "$1"
         validate "$2"

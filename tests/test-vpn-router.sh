@@ -42,6 +42,7 @@ esac
 case "$1" in
     active) cat active ;;
     validate) test -s "$3" ;;
+    prepared-address) test "$2:$3" = awg_backup2:10.8.1.210/32 ;;
     snapshot) cp candidate "$4/candidate" ;;
     stage) cp "$4" candidate; test ! -e fail-stage ;;
     verify) test "$(cat active)" = "$2" && test "$4" = DE && test ! -e fail-verify ;;
@@ -61,6 +62,7 @@ EOF
 chmod +x "$tmp/config/adapter" "$tmp/age"
 cat >"$tmp/ip" <<'EOF'
 #!/bin/sh
+if [ "$1" = link ]; then [ ! -f "$TEST_CONFIG/down-third" ] || [ "$4" != awg_backup2 ]; exit $?; fi
 case "$6" in
     awg_backup2) address=10.8.1.210/32 ;;
     awg_backup) address=10.8.1.13/32 ;;
@@ -198,6 +200,8 @@ fi
 # A verified third reserve is accepted without switching the active path.
 mv "$TEST_CONFIG/transaction" "$tmp/previous-upload"
 echo awg_main > "$TEST_CONFIG/active"
+touch "$TEST_CONFIG/down-third"
+reject prepare-upload-target unsafe DE awg_backup2 10.8.1.211/32 < "$tmp/upload"
 run prepare-upload-target third-reserve DE awg_backup2 10.8.1.210/32 < "$tmp/upload"
 reject accept
 run verify
