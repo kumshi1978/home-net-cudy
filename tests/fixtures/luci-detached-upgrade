@@ -6,7 +6,12 @@ cp "$REPO/MONITORING_VERSION" "$TMP/src/MONITORING_VERSION"
 tar -czf "$TMP/rpc-payloads/archive.tar.gz" -C "$TMP" src
 sed "s|/etc/openwrt_release|$TMP/root/etc/openwrt_release|g" "$REPO/install.sh" > "$TMP/rpc-payloads/bootstrap"
 cp "$REPO/install-all.sh" "$TMP/rpc-payloads/bundle-installer"
-cp "$REPO/bundle.conf" "$TMP/rpc-payloads/manifest"
+# Keep this regression on the historical SAFE monitoring release.
+# The new CONTROLLED controller package has separate installer and lock tests.
+sed -e "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.8'/" \
+    -e "s/^FAILOVER_VERSION=.*/FAILOVER_VERSION='1.4.1'/" \
+    -e "s/^UPDATE_ACTION_CLASS=.*/UPDATE_ACTION_CLASS='SAFE'/" \
+    -e '/^FAILOVER_INSTALL_REF=/d' "$REPO/bundle.conf" > "$TMP/rpc-payloads/manifest"
 printf '{"tag_name":"v1.7.8","draft":false,"prerelease":false}\n' > "$TMP/rpc-payloads/release"
 printf '1.7.8\n' > "$TMP/rpc-payloads/version"
 printf '#!/bin/sh\nexit 0\n' > "$TMP/rpc-payloads/updater"

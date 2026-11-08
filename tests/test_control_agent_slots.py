@@ -85,6 +85,18 @@ class SlotPreparation(unittest.TestCase):
         self.assertEqual(self.network.read_bytes(), prepared)
         self.assertEqual(sum(call.args[0] == ['awg', 'genkey'] for call in self.output.call_args_list), 2)
 
+    def test_second_reserve_is_opt_in_and_preserves_existing_pairs(self):
+        slots.prepare('apartment-backup')
+        before=json.loads(self.network.read_text())
+        self.assertNotIn('network.awg_backup2', before)
+        result=slots.prepare('apartment-backup',backup2=True)
+        after=json.loads(self.network.read_text())
+        for key,value in before.items():self.assertEqual(after[key],value)
+        self.assertEqual(after['network.awg_backup2.addresses'],'10.8.1.210/32')
+        self.assertEqual(after['network.awg_backup2.auto'],'0')
+        self.assertEqual(result['phase'],'ready')
+        self.assertFalse(slots.prepare('apartment-backup',backup2=True)['changed'])
+
     def test_existing_slots_and_open_transaction_remain_unchanged(self):
         values = json.loads(self.network.read_text())
         for index, slot in enumerate(slots.SLOTS):

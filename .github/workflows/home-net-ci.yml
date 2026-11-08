@@ -20,6 +20,9 @@ jobs:
         suite:
           - country-lookup
           - monitoring-startup-grace
+          - vpn-router
+          - vpn-cudy-adapter
+          - control-agent-three
           - home-net-update-self-test
           - home-net-update
           - install-all-safety
