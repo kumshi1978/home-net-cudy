@@ -10,7 +10,13 @@ cp "$TMP/state" "$TMP/before"
 cat >"$TMP/control" <<'EOF'
 #!/bin/sh
 set -eu
-test "$HOME_NET_CONTROL_REF" = ba3a1aa1ed67f9cc29ccf7724b19a0e6a17232bd
+test "$HOME_NET_CONTROL_REF" = 6fe628cfc221151c4b3199361b3b8c21eff1c9f5
+if [ "${1:-}" = --prepare-dependencies ]; then
+    test "${CONTROL_PREPARE_FAIL:-0}" = 0
+    echo prepared >"$CONTROL_MARKER.prepared"
+    exit 0
+fi
+test -f "$CONTROL_MARKER.prepared"
 test "${CONTROL_FAIL:-0}" = 0
 echo installed >"$CONTROL_MARKER"
 EOF
@@ -24,7 +30,7 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
     */bundle.conf) cp "$CONTROL_BUNDLE" "$out" ;;
-    https://raw.githubusercontent.com/kumshi1978/home-net-cudy/ba3a1aa1ed67f9cc29ccf7724b19a0e6a17232bd/control-agent/install.sh)
+    https://raw.githubusercontent.com/kumshi1978/home-net-cudy/6fe628cfc221151c4b3199361b3b8c21eff1c9f5/control-agent/install.sh)
         cp "$CONTROL_FIXTURE" "$out" ;;
     *) echo 'unexpected component download' >&2; exit 1 ;;
 esac
@@ -32,7 +38,7 @@ EOF
 chmod +x "$TMP/bin/wget"
 sed "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.7'/" "$ROOT/bundle.conf" > "$TMP/legacy-bundle"
 run() {
-    PATH="$TMP/bin:$PATH" CONTROL_ROOT="$ROOT" CONTROL_BUNDLE="$TMP/legacy-bundle" CONTROL_FIXTURE="$TMP/control" CONTROL_MARKER="$TMP/marker" \
+    PATH="$TMP/bin:$PATH" CONTROL_ROOT="$ROOT" CONTROL_BUNDLE="${TEST_BUNDLE:-$TMP/legacy-bundle}" CONTROL_FIXTURE="$TMP/control" CONTROL_MARKER="$TMP/marker" \
         HOME_NET_CONTROL_AUTOREGISTER=1 HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_UPDATE_STATE="$TMP/state" \
         HOME_NET_AUTO_UPDATE_MODE=apply HOME_NET_SKIP_VERSION_RECORD=1 sh "$TMP/install"
 }
@@ -44,3 +50,13 @@ if CONTROL_FAIL=1 run >"$TMP/output" 2>&1; then echo 'installation error must pr
 test ! -f "$TMP/marker"
 cmp "$TMP/before" "$TMP/state"
 echo 'PASS normal stable upgrade installs the pinned control agent and preserves version on failure'
+rm "$TMP/marker.prepared"
+if CONTROL_PREPARE_FAIL=1 TEST_BUNDLE="$ROOT/bundle.conf" run >"$TMP/output" 2>&1; then
+    echo 'dependency failure must precede runtime downloads' >&2; exit 1
+fi
+grep -q 'dependency preflight failed; runtime components were not updated' "$TMP/output"
+! grep -q 'unexpected component download' "$TMP/output"
+test ! -f "$TMP/marker.prepared"
+test ! -f "$TMP/marker"
+cmp "$TMP/before" "$TMP/state"
+echo 'PASS dependency failure on full 1.7.9 path prevents all runtime installers and version changes'
