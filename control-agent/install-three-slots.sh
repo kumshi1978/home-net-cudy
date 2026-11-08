@@ -12,7 +12,7 @@ command -v flock >/dev/null 2>&1 || fail 'flock required'
 if ! [ /proc/self/fd/9 -ef "$lock" ]; then exec 9>>"$lock"; fi
 flock -n 9 || fail 'VPN maintenance busy'
 config=/etc/home-net/vpn
-for path in /etc/home-net "$config" "$config/adapter" "$config/transaction" /usr/bin/home-net-vpn-router /usr/bin/home-net-vpn-persist.py; do
+for path in /etc/home-net "$config" "$config/adapter" "$config/transaction" /usr/bin/home-net-vpn-router /usr/bin/home-net-vpn-persist.py /usr/bin/home-net-vpn-rebind.py; do
     [ ! -L "$path" ] || fail 'unsafe installation path'
 done
 phase=idle
@@ -29,6 +29,10 @@ if [ -f /usr/bin/home-net-vpn-router ]; then
     case "$current" in 5ac78c50fe2e163bd42ec45b6101452c5322c6809a81b6cc8defbc27115cf704|b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743|f882f28f83a698c333e85d062f92fde86a19b4eacf0a5b081bee64d434675a60|f7942ee4d2a06421e477ed1ec1477a4fe9facdec4b2596cc8df275b30cad50ba) ;;
         *) fail 'custom controller preserved; review required' ;; esac
 fi
+if [ -f /usr/bin/home-net-vpn-rebind.py ]; then
+    current=$(sha256sum /usr/bin/home-net-vpn-rebind.py | cut -d ' ' -f1)
+    [ "$current" = 7f3966307f08c598bae97e1000efea810212e1f75563d9bce22eb81dde49d8ab ] || fail 'custom slot rebinder preserved; review required'
+fi
 work=$(mktemp -d /tmp/home-net-controller.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' HUP INT TERM
@@ -40,13 +44,16 @@ wget -q -T 60 -O "$work/home-net-vpn-manifest-validate" "https://raw.githubuserc
 echo '9d99142b237ebf221b8acd18604601dc954c0e71bb42f9f06ef700698bceb745  '"$work/home-net-vpn-manifest-validate" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-persist.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-persist.py" || fail 'download failed'
 echo '98454b13b657d7ce7ffd5986d38cb91acf8ccadf17e3aaa455115f5d25fac29b  '"$work/home-net-vpn-persist.py" | sha256sum -c - || fail 'integrity mismatch'
+wget -q -T 60 -O "$work/home-net-vpn-rebind.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-rebind.py" || fail 'download failed'
+echo '7f3966307f08c598bae97e1000efea810212e1f75563d9bce22eb81dde49d8ab  '"$work/home-net-vpn-rebind.py" | sha256sum -c - || fail 'integrity mismatch'
+python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/home-net-vpn-rebind.py"
 for file in home-net-vpn-router home-net-vpn-cudy-adapter home-net-vpn-manifest-validate; do sh -n "$work/$file" || fail 'invalid shell'; done
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/home-net-vpn-persist.py"
 backup=/etc/home-net/controller-backups
 [ ! -L "$backup" ] || fail 'unsafe backup directory'
 mkdir -p "$backup" "$config"
 backup=$(mktemp -d "$backup/install.XXXXXX")
-for file in /usr/bin/home-net-vpn-router /usr/bin/home-net-vpn-manifest-validate /usr/bin/home-net-vpn-persist.py "$config/adapter"; do
+for file in /usr/bin/home-net-vpn-router /usr/bin/home-net-vpn-manifest-validate /usr/bin/home-net-vpn-persist.py /usr/bin/home-net-vpn-rebind.py "$config/adapter"; do
     [ ! -L "$file" ] || fail 'unsafe target'
     [ ! -f "$file" ] || cp -p "$file" "$backup/$(basename "$file")"
 done
@@ -55,6 +62,7 @@ install_atomic() {
     temporary=$(mktemp "${2%/*}/.home-net-controller.XXXXXX")
     cp "$1" "$temporary"; chmod 0700 "$temporary"; mv "$temporary" "$2"
 }
+install_atomic "$work/home-net-vpn-rebind.py" /usr/bin/home-net-vpn-rebind.py
 install_atomic "$work/home-net-vpn-persist.py" /usr/bin/home-net-vpn-persist.py
 install_atomic "$work/home-net-vpn-manifest-validate" /usr/bin/home-net-vpn-manifest-validate
 install_atomic "$work/home-net-vpn-router" /usr/bin/home-net-vpn-router

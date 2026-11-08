@@ -24,6 +24,7 @@ STATE = Path("/etc/home-net/vpn/control-agent")
 TRANSACTION = STATE.parent / "transaction"
 HELPER = "/usr/bin/home-net-vpn-router"
 SLOT_PREPARER = Path("/usr/sbin/home-net-prepare-slots.py")
+SLOT_REBINDER = Path('/usr/bin/home-net-vpn-rebind.py')
 TERMINAL = {"verified", "failed", "recovery_required", "expired"}
 VERIFY_DELAYS = (0, 10, 20, 30, 40, 50)
 POLL_INTERVAL = 60
@@ -251,6 +252,11 @@ def router_topology():
     except OSError:pass
     result = {"active": active if active in slots else None, "slots": slots, "transaction": transaction,
               "delivery_ready": ready}
+    result['binding_ready'] = SLOT_REBINDER.is_file()
+    if CONFIG.exists():
+        settings=json.loads(CONFIG.read_text())
+        if type(settings.get('binding_failed_revision')) is int:
+            result['binding_failed_revision']=settings['binding_failed_revision']
     if transaction_id:result["transaction_id"]=transaction_id
     try:
         result["preparation"] = json.loads((STATE.parent / "slot-preparation.json").read_text())
@@ -305,6 +311,14 @@ def verify_plan(config,response):
                 or len(set(plan['order']))!=len(plan['order']) or not set(plan['order'])<=set(plan['slots'])
                 or type(plan['order_size']) is not int or plan['order_size']!=len(plan['order']))):
         raise ValueError("invalid slot plan")
+    if 'rebind' in plan:
+        action=plan['rebind']
+        if not isinstance(action,dict) or action.get('revision')!=plan['revision'] or set(action)!= {'revision','mapping','expected','active','selected','desired'}:
+            raise ValueError('invalid binding action')
+        mapping=action['mapping']
+        if (not isinstance(mapping,dict) or set(mapping) not in (set(plan['slots'][:2]),set(plan['slots']))
+                or set(mapping.values()) != set(mapping) or action['active'] not in mapping or action['selected'] not in mapping):
+            raise ValueError('invalid binding permutation')
     return plan
 
 
@@ -348,6 +362,14 @@ def poll_once():
             if status.get("phase") == "ready" and set(status.get("slots", {})) == set(plan["slots"]):
                 if config.get("prepared_revision") != plan["revision"]:
                     config["prepared_revision"] = plan["revision"]; save_config(config)
+        if plan and role and plan.get('rebind'):
+            if config.get('binding_failed_revision') == plan['revision']: return
+            if not SLOT_REBINDER.is_file(): raise ValueError('slot rebinder unavailable')
+            result=subprocess.run([sys.executable,str(SLOT_REBINDER),canonical(plan['rebind']).decode()],
+                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=240)
+            if result.returncode:
+                config['binding_failed_revision']=plan['revision'];save_config(config)
+            return
         if plan and plan.get("order_size") in (2,3):
             if not helper("set-order", ",".join(plan["order"])):
                 raise ValueError("ordered failover is not ready")
