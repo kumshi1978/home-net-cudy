@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.8}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.9}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -127,8 +127,8 @@ fetch() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    control_ref='c026a85b6c4728675320b1db8c9da16f9e8e8804'
-    control_hash='372e2b18d109915207c613acdbd7459cadb296ec4a9bd31574230938c94805ff'
+    control_ref='3309e89fc291dc4ce7addc15b1543f610a3a6582'
+    control_hash='8021734b30d4d841d427a925f150ab53aef4810a5d9f04c98fcd462fa8c63959'
     control_installer="$TMP_DIR/control-agent-install.sh"
     fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
@@ -319,6 +319,9 @@ fetch "$BUNDLE_URL" "$BUNDLE_CONF"
 valid_payload_sha "${MONITORING_BOOTSTRAP_REF:-}" || fail "MONITORING_BOOTSTRAP_REF must be a full commit SHA"
 valid_payload_sha "${HOME_NET_UPDATER_REF:-}" || fail "HOME_NET_UPDATER_REF must be a full commit SHA"
 
+if [ -n "${FAILOVER_INSTALL_REF:-}" ]; then
+    valid_payload_sha "$FAILOVER_INSTALL_REF" || fail 'FAILOVER_INSTALL_REF must be a full commit SHA'
+fi
 case "$UPDATE_ACTION_CLASS" in SAFE|CONTROLLED|CRITICAL) ;; *) fail "invalid UPDATE_ACTION_CLASS in bundle.conf" ;; esac
 ACTION_CLASS="${HOME_NET_ACTION_CLASS:-$UPDATE_ACTION_CLASS}"
 [ "$ACTION_CLASS" = "$UPDATE_ACTION_CLASS" ] || fail "HOME_NET_ACTION_CLASS does not match bundle.conf"
@@ -364,7 +367,18 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         ;;
 esac
 
-FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/v$FAILOVER_VERSION/install.sh"
+if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+    maintenance=/var/run/home-net-vpn-maintenance.lock
+    [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
+    command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
+    exec 9>>"$maintenance"
+    flock -n 9 || fail 'VPN maintenance is busy'
+    phase=idle
+    [ ! -f /etc/home-net/vpn/transaction/phase ] || phase=$(cat /etc/home-net/vpn/transaction/phase)
+    case "$phase" in idle|verified) ;; *) fail 'unfinished VPN transaction requires review before update';; esac
+fi
+FAILOVER_INSTALL_REF="${FAILOVER_INSTALL_REF:-v$FAILOVER_VERSION}"
+FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/$FAILOVER_INSTALL_REF/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
 HOME_NET_UPDATE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/scripts/home-net-update"
 HOME_NET_UPDATE_INIT_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$HOME_NET_UPDATER_REF/init.d/home-net-update"
@@ -405,7 +419,7 @@ if [ "${HOME_NET_STAGE_ONLY:-0}" = "1" ]; then
     printf '\n===== STAGE ONLY: RUNTIME FAILOVER ACTIVATION SKIPPED =====\n'
 elif [ "$NEED_FAILOVER" = "1" ]; then
     printf '\n===== INSTALL FAILOVER (CONTROLLED) =====\n'
-    UPDATE_SOURCE_REF="v$FAILOVER_VERSION" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
+    UPDATE_SOURCE_REF="$FAILOVER_INSTALL_REF" APPLY_NOW=1 sh "$FAILOVER_INSTALL"
 else
     printf '\n===== FAILOVER ALREADY AT REQUIRED VERSION =====\n'
 fi
@@ -456,6 +470,9 @@ pgrep -af '/usr/bin/podkop-awg-failover' 2>/dev/null || true
 pgrep -af '/usr/bin/podkop-health' 2>/dev/null || true
 cat "$HOME_NET_HEALTH_STATE" 2>/dev/null || true
 
+enroll_fleet_ssh || fail "bundle installed, but fleet SSH enrollment failed"
+install_control_agent
+
 if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     printf '\n===== WAIT FOR FRESH MONITORING CYCLE =====\n'
     if wait_for_fresh_bootstrap_health "$BOOTSTRAP_BEFORE_LAST" "$BOOTSTRAP_BEFORE_STARTED"; then
@@ -467,6 +484,4 @@ if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     fi
 fi
 
-enroll_fleet_ssh || fail "bundle installed, but fleet SSH enrollment failed"
-install_control_agent
 printf '\nHOME NET bundle installation complete.\n'
