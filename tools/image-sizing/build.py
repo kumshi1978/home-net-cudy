@@ -22,12 +22,23 @@ WORK.mkdir(exist_ok=True)
 def download(item):
     name = item.get('name', item['url'].rsplit('/', 1)[-1])
     dest = WORK / name
-    with urllib.request.urlopen(item['url'], timeout=180) as source, dest.open('wb') as target:
-        shutil.copyfileobj(source, target)
+    print('Downloading ' + name, flush=True)
+    if 'imagebuilder' in name:
+        mirror = item['url'].replace('downloads.openwrt.org', 'mirror-03.infra.openwrt.org')
+        with (OUT / 'download.log').open('w') as log:
+            subprocess.run(['aria2c', '--max-connection-per-server=8', '--split=8',
+                '--min-split-size=8M', '--max-tries=3', '--timeout=30', '--connect-timeout=15',
+                '--summary-interval=30', '--file-allocation=none', '--dir=' + str(WORK),
+                '--out=' + name, mirror, item['url']], stdout=log, stderr=subprocess.STDOUT,
+                timeout=600, check=True)
+    else:
+        with urllib.request.urlopen(item['url'], timeout=60) as source, dest.open('wb') as target:
+            shutil.copyfileobj(source, target)
     assert hashlib.sha256(dest.read_bytes()).hexdigest() == item['sha256'], name
     return dest
 
 builder = download(LOCK['imagebuilder'])
+print('Extracting verified ImageBuilder', flush=True)
 subprocess.run(['tar', '--zstd', '-xf', str(builder), '-C', str(WORK)], check=True)
 IB = next(p for p in WORK.glob('openwrt-imagebuilder-*') if p.is_dir())
 for item in LOCK['packages']:
@@ -73,7 +84,8 @@ command = ['make', 'image', 'PROFILE=' + LOCK['profile'], 'PACKAGES=' + ' '.join
 (OUT / 'inputs.json').write_text(json.dumps({'variant': VARIANT, 'lock': LOCK, 'packages': packages,
     'age_binary_bytes': age_sizes, 'contains_device_configuration': False}, indent=2))
 with (OUT / 'build.log').open('w') as log:
-    result = subprocess.run(command, cwd=IB, stdout=log, stderr=subprocess.STDOUT)
+    print('Building ' + VARIANT + ' image', flush=True)
+    result = subprocess.run(command, cwd=IB, stdout=log, stderr=subprocess.STDOUT, timeout=900)
 if result.returncode:
     print((OUT / 'build.log').read_text()[-18000:])
     sys.exit(result.returncode)

@@ -19,7 +19,7 @@ jobs:
       - name: Host build prerequisites
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends build-essential libncurses-dev zlib1g-dev gawk flex gettext rsync unzip zstd
+          sudo apt-get install -y --no-install-recommends build-essential libncurses-dev zlib1g-dev gawk flex gettext rsync unzip zstd aria2
       - name: Build sizing image only
         run: python3 tools/image-sizing/build.py '${{ matrix.variant }}'
       - uses: actions/upload-artifact@v4
