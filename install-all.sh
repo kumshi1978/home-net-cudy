@@ -124,15 +124,34 @@ fetch() {
     fi
 }
 
-install_control_agent() {
+load_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    control_ref='ba3a1aa1ed67f9cc29ccf7724b19a0e6a17232bd'
-    control_hash='cf60857bd20bfac340b2ffffbb596266ceb194fb1da9e603a710ea56522e4684'
+    [ "${control_loaded:-0}" != 1 ] || return 0
+    control_ref='a33207d3c06aafa7a7233ed1db6872632954b951'
+    control_hash='a1931aa7b393c4c0387d076ca2d875661ef692a39bf203287b97360a7c1bc6e5'
     control_installer="$TMP_DIR/control-agent-install.sh"
     fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$control_ref/control-agent/install.sh" "$control_installer"
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
     sh -n "$control_installer" || fail "control installer syntax check failed"
+    control_loaded=1
+}
+
+prepare_control_agent() {
+    [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
+    [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
+    load_control_agent
+    # Dependency errors must precede all runtime component installers and SSH
+    # enrollment. Check the full plan, install only the compact dependencies,
+    # then verify required imports/tools before changing Failover/Monitoring.
+    HOME_NET_CONTROL_REF="$control_ref" sh "$control_installer" --prepare-dependencies ||
+        fail "control agent dependency preflight failed; runtime components were not updated"
+}
+
+install_control_agent() {
+    [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
+    [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
+    load_control_agent
     HOME_NET_CONTROL_REF="$control_ref" sh "$control_installer" || fail "control agent installation failed"
 }
 
@@ -336,6 +355,8 @@ else
     AUTO_UPDATE_MODE="$DEFAULT_AUTO_UPDATE_MODE"
 fi
 case "$AUTO_UPDATE_MODE" in check|apply) ;; *) fail "HOME_NET_AUTO_UPDATE_MODE must be check or apply" ;; esac
+
+prepare_control_agent
 
 printf 'HOME NET bundle %s\n' "$HOME_NET_BUNDLE_VERSION"
 printf 'Failover %s, Monitoring %s, auto-update %s, action class %s\n' "$FAILOVER_VERSION" "$MONITORING_VERSION" "$AUTO_UPDATE_MODE" "$ACTION_CLASS"

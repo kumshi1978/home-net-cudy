@@ -3,6 +3,9 @@ set -eu
 umask 077
 fail() { echo "HOME NET Control: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail 'root required'
+mode=${1:-install}
+case "$mode" in install|--preflight|--prepare-dependencies) ;; *) fail 'usage: install.sh [--preflight|--prepare-dependencies]' ;; esac
+[ "$#" -le 1 ] || fail 'too many arguments'
 ref=${HOME_NET_CONTROL_REF:-}
 printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$' || fail 'immutable source commit required'
 directory=/etc/home-net/keys
@@ -18,18 +21,117 @@ init_temp=
 slots_temp=
 trap 'rm -rf "$work"; [ -z "$identity_temp" ] || rm -f "$identity_temp"; [ -z "$agent_temp" ] || rm -f "$agent_temp"; [ -z "$init_temp" ] || rm -f "$init_temp"; [ -z "$slots_temp" ] || rm -f "$slots_temp"; rmdir "$lock"' EXIT
 trap 'exit 1' HUP INT TERM
-if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import ssl,fcntl,json' >/dev/null 2>&1 ||
-   ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+python_ready() {
+    command -v python3 >/dev/null 2>&1 && python3 -B -c 'import ast,base64,email.parser,fcntl,hashlib,hmac,http.client,ipaddress,json,os,pathlib,re,signal,socket,ssl,subprocess,sys,tempfile,threading,time,urllib.parse' >/dev/null 2>&1
+}
+age_ready() {
+    command -v age >/dev/null 2>&1 && command -v age-keygen >/dev/null 2>&1 &&
+        age --version >/dev/null 2>&1 && age-keygen --version >/dev/null 2>&1
+}
+# A reserve covers controller/agent files, atomic replacements, backups and
+# filesystem overhead. It is additional to uncompressed dependency sizes.
+reserve_kib=4096
+packages=
+if ! python_ready; then
+    packages='python3-light python3-openssl python3-email python3-urllib'
+fi
+if ! age_ready; then packages="$packages age"; fi
+needed_bytes=0
+manager=none
+if [ -n "$packages" ]; then
     if command -v apk >/dev/null 2>&1; then
-        apk add python3 python3-ssl age || fail 'agent dependencies unavailable'
+        manager=apk
+        # Resolve ALL dependencies before touching flash. No binary fallback or
+        # alternate feed is trusted implicitly when age is absent.
+        apk add --simulate $packages >"$work/apk-plan" 2>&1 ||
+            fail 'required packages unavailable; provision reviewed age/age-keygen or a supported feed first'
+        # apk metadata differs across supported OpenWrt generations. Until an
+        # exact installed-size plan is available, use a conservative minimum.
+        needed_bytes=33554432
     elif command -v opkg >/dev/null 2>&1; then
-        opkg update && opkg install python3 python3-ssl age || fail 'agent dependencies unavailable'
+        manager=opkg
+        opkg update >"$work/opkg-update" 2>&1 || fail 'package index refresh failed'
+        opkg status >"$work/package-metadata" || fail 'installed package metadata unavailable'
+        for index in /var/opkg-lists/*; do
+            case "$index" in *.sig) continue ;; esac
+            [ -f "$index" ] || continue
+            printf '\n' >>"$work/package-metadata"
+            if gzip -t "$index" 2>/dev/null; then
+                gzip -dc "$index" >>"$work/package-metadata" || fail 'invalid package index'
+            else
+                cat "$index" >>"$work/package-metadata" || fail 'unreadable package index'
+            fi
+        done
+        # Resolve the complete closure, including Provides, using current
+        # installed packages. Never source metadata or trust archive Size as
+        # installed space. Unknown dependencies/sizes fail closed.
+        awk -v roots="$packages" '
+            BEGIN { RS=""; FS="\n" }
+            {
+                p=""; d=""; z=""; v=""; installed=0
+                for(i=1;i<=NF;i++) {
+                    if($i ~ /^Package: /) p=substr($i,10)
+                    if($i ~ /^Depends: /) d=substr($i,10)
+                    if($i ~ /^Installed-Size: /) z=substr($i,17)
+                    if($i ~ /^Provides: /) v=substr($i,11)
+                    if($i ~ /^Status: [^ ]+ [^ ]+ installed$/) installed=1
+                }
+                if(p=="") next
+                if(installed) have[p]=1
+                else { available[p]=1; deps[p]=d; sizes[p]=z }
+                count=split(v, aliases, /, */)
+                for(j=1;j<=count;j++) {
+                    sub(/ .*/, "", aliases[j])
+                    if(aliases[j]!="") {
+                        if(installed) have[aliases[j]]=1
+                        else if(!(aliases[j] in provider)) provider[aliases[j]]=p
+                    }
+                }
+            }
+            function visit(p, n,a,j,d) {
+                if(p in have) return
+                if(!(p in available) && p in provider) p=provider[p]
+                if(p in have) return
+                if(p in seen) return
+                seen[p]=1
+                if(!(p in available)) { print "unavailable package: " p > "/dev/stderr"; bad=1; return }
+                if(sizes[p] !~ /^[0-9]+$/) { print "unknown installed size: " p > "/dev/stderr"; bad=1; return }
+                total+=sizes[p]
+                d=deps[p]; gsub(/\([^)]*\)/,"",d)
+                n=split(d,a,/, */)
+                for(j=1;j<=n;j++) {
+                    gsub(/^[ \t]+|[ \t]+$/,"",a[j])
+                    if(a[j]=="") continue
+                    if(a[j] !~ /^[A-Za-z0-9+_.-]+$/) { bad=1; continue }
+                    visit(a[j])
+                }
+            }
+            END {
+                n=split(roots,r,/ +/)
+                for(k=1;k<=n;k++) if(r[k]!="") visit(r[k])
+                if(bad) exit 1
+                printf "%.0f\n",total
+            }
+        ' "$work/package-metadata" >"$work/needed-bytes" ||
+            fail 'dependency plan incomplete; no packages installed (age may be unavailable in this feed)'
+        needed_bytes=$(cat "$work/needed-bytes")
     else
         fail 'OpenWrt package manager unavailable'
     fi
 fi
-python3 -c 'import ssl,fcntl,json' || fail 'Python SSL unavailable'
-command -v age >/dev/null && command -v age-keygen >/dev/null || fail 'age unavailable'
+free_kib=$(df -Pk /overlay 2>/dev/null | awk 'NR==2 {print $4}')
+case "$free_kib" in ''|*[!0-9]*) fail 'cannot determine writable flash space' ;; esac
+needed_kib=$(( (needed_bytes + 1023) / 1024 + reserve_kib ))
+echo "HOME NET Control: dependency preflight requires ${needed_kib} KiB, available ${free_kib} KiB"
+[ "$free_kib" -ge "$needed_kib" ] || fail 'insufficient flash for dependencies plus 4 MiB reserve; runtime unchanged'
+[ "$mode" != --preflight ] || exit 0
+case "$manager" in
+    apk) apk add $packages || fail 'agent dependencies unavailable' ;;
+    opkg) opkg install $packages || fail 'agent dependencies unavailable' ;;
+esac
+python_ready || fail 'required Python imports unavailable; runtime upgrade must not proceed'
+age_ready || fail 'age/age-keygen unavailable; runtime upgrade must not proceed'
+[ "$mode" != --prepare-dependencies ] || exit 0
 for file in cudy.py vpn-control-cudy.init prepare-slots.py; do
     wget -q -T 60 -O "$work/$file" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/control-agent/$file" || fail 'download failed'
 done
