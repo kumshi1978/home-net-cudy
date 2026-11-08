@@ -17,7 +17,7 @@ class Rebind(unittest.TestCase):
         for edit in (lambda s:s['mapping'].update(awg_backup='awg_backup'),
                      lambda s:s['mapping'].update(lan='lan'),
                      lambda s:s['expected']['awg_backup'].update(address='10.8.1.1/32'),
-                     lambda s:s.update(selected='awg_main'),
+                     lambda s:s.update(selected='lan'),
                      lambda s:s.update(revision=0)):
             bad=copy.deepcopy(spec);edit(bad)
             with self.assertRaises((ValueError,KeyError)):m.validate(bad)
