@@ -156,7 +156,7 @@ case "$verb:$#" in
     prepared-address:2)
         slot "$1"
         [ "$(active)" != "$1" ]
-        ! ip link show dev "$1" >/dev/null 2>&1
+        if ip link show dev "$1" >/dev/null 2>&1; then exit 1; fi
         [ "$(uci -q get "network.$1.proto")" = amneziawg ]
         [ "$(uci -q get "network.$1.home_net_prepared")" = 1 ]
         [ "$(uci -q get "network.$1.auto")" = 0 ]
