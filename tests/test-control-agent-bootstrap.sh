@@ -10,7 +10,7 @@ cp "$TMP/state" "$TMP/before"
 cat >"$TMP/control" <<'EOF'
 #!/bin/sh
 set -eu
-test "$HOME_NET_CONTROL_REF" = fa774ea526c89c3e9bb71948d3d3fc16e3f06603
+test "$HOME_NET_CONTROL_REF" = 4e676b837d1bc1e95790ad258e3d2f1e4418fb0c
 test "${CONTROL_FAIL:-0}" = 0
 echo installed >"$CONTROL_MARKER"
 EOF
@@ -24,7 +24,7 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
     */bundle.conf) cp "$CONTROL_BUNDLE" "$out" ;;
-    https://raw.githubusercontent.com/kumshi1978/home-net-cudy/fa774ea526c89c3e9bb71948d3d3fc16e3f06603/control-agent/install.sh)
+    https://raw.githubusercontent.com/kumshi1978/home-net-cudy/4e676b837d1bc1e95790ad258e3d2f1e4418fb0c/control-agent/install.sh)
         cp "$CONTROL_FIXTURE" "$out" ;;
     *) echo 'unexpected component download' >&2; exit 1 ;;
 esac
