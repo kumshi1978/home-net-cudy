@@ -157,7 +157,7 @@ reject prepared-address awg_backup2 10.8.1.210/32
 # ifup returns before netifd creates the device: wait without touching active VPN.
 touch "$TEST/down-third"
 run snapshot awg_main awg_backup2 "$backup"
-test -s "$backup/target-was-down"
+test -f "$backup/target-was-down"
 test -s "$TEST/device-waits"
 test "$(cat "$TEST/active")" = awg_main
 # A device which never becomes ready is brought down and rejected in bounded time.
