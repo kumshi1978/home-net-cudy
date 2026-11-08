@@ -1,0 +1,30 @@
+name: TR3000 128 MiB image sizing
+on:
+  push:
+    branches: [experiment/tr3000-128-image-sizing]
+permissions:
+  contents: read
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [vpn, panel]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Host build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential libncurses-dev zlib1g-dev gawk flex gettext rsync unzip zstd
+      - name: Build sizing image only
+        run: python3 tools/image-sizing/build.py '${{ matrix.variant }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tr3000-size-${{ matrix.variant }}
+          path: sizing-results/
+          retention-days: 7
