@@ -21,21 +21,21 @@ case "$phase" in idle|verified) ;; *) fail 'unfinished transaction requires revi
 # Known reviewed two-slot adapter/controller, including the newline-only canary copy.
 if [ -f "$config/adapter" ]; then
     current=$(sha256sum "$config/adapter" | cut -d ' ' -f1)
-    case "$current" in 7fb7f1464b908e4dd8dad9c003bd0b228fca839c04b2cd5fb6df4395ae58d0ea|c297829fa2148a5aa055c92c0d637b23aa6adf3969f425f3e461e109ad488d54|72e7fd7d7334ffe990377f31da7fc93ad2ae031dfbc409a0aefbad80b9174046) ;;
+    case "$current" in fa893dd36d01aeb34a293bb06019604f5001e2e8bbef38017d4a56dffa99ed4c|7fb7f1464b908e4dd8dad9c003bd0b228fca839c04b2cd5fb6df4395ae58d0ea|c297829fa2148a5aa055c92c0d637b23aa6adf3969f425f3e461e109ad488d54|72e7fd7d7334ffe990377f31da7fc93ad2ae031dfbc409a0aefbad80b9174046) ;;
         *) fail 'custom adapter preserved; review required' ;; esac
 fi
 if [ -f /usr/bin/home-net-vpn-router ]; then
     current=$(sha256sum /usr/bin/home-net-vpn-router | cut -d ' ' -f1)
-    case "$current" in b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743|f882f28f83a698c333e85d062f92fde86a19b4eacf0a5b081bee64d434675a60|f7942ee4d2a06421e477ed1ec1477a4fe9facdec4b2596cc8df275b30cad50ba) ;;
+    case "$current" in 5ac78c50fe2e163bd42ec45b6101452c5322c6809a81b6cc8defbc27115cf704|b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743|f882f28f83a698c333e85d062f92fde86a19b4eacf0a5b081bee64d434675a60|f7942ee4d2a06421e477ed1ec1477a4fe9facdec4b2596cc8df275b30cad50ba) ;;
         *) fail 'custom controller preserved; review required' ;; esac
 fi
 work=$(mktemp -d /tmp/home-net-controller.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' HUP INT TERM
 wget -q -T 60 -O "$work/home-net-vpn-router" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-router" || fail 'download failed'
-echo 'b37acc7146fee71e324f7a92d65e011fe95dad7a2a96790de373b2c502030743  '"$work/home-net-vpn-router" | sha256sum -c - || fail 'integrity mismatch'
+echo '5ac78c50fe2e163bd42ec45b6101452c5322c6809a81b6cc8defbc27115cf704  '"$work/home-net-vpn-router" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-cudy-adapter" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-cudy-adapter" || fail 'download failed'
-echo '7fb7f1464b908e4dd8dad9c003bd0b228fca839c04b2cd5fb6df4395ae58d0ea  '"$work/home-net-vpn-cudy-adapter" | sha256sum -c - || fail 'integrity mismatch'
+echo 'fa893dd36d01aeb34a293bb06019604f5001e2e8bbef38017d4a56dffa99ed4c  '"$work/home-net-vpn-cudy-adapter" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-manifest-validate" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-manifest-validate" || fail 'download failed'
 echo '9d99142b237ebf221b8acd18604601dc954c0e71bb42f9f06ef700698bceb745  '"$work/home-net-vpn-manifest-validate" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-persist.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-persist.py" || fail 'download failed'

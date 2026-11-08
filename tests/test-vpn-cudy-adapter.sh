@@ -14,10 +14,16 @@ case "${0##*/}:$1" in
     ubus:call)
         if [ -e "$TEST/conflict" ]; then echo '{"podkop-awg-failover":{}}'; else echo '{}'; fi ;;
     uci:-q)
-        case "$3" in *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
+        case "$3" in
+          network.awg_backup2.proto) echo amneziawg ;;
+          network.awg_backup2.home_net_prepared) echo 1 ;;
+          network.awg_backup2.auto|network.awg_backup2.defaultroute|network.awg_backup2.peerdns) echo 0 ;;
+          network.awg_backup2.addresses) echo 10.8.1.210/32 ;;
+          network) echo network.awg_backup2=interface ;;
+          *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
     podkop-country-lookup:*) echo DE ;;
-    ip:link) exit 0 ;;
+    ip:link) [ ! -f "$TEST/down-third" ] ;;
     awg:showconf) cat "$TEST/$2" ;;
     awg:syncconf) cp "$3" "$TEST/$2" ;;
     awg:show)
@@ -127,3 +133,10 @@ run check-restored awg_main awg_backup "$backup"
 test "$(cat "$tmp/readiness")" = retry
 test "$(wc -l <"$tmp/restarts")" -eq 3
 echo 'PASS: Cudy adapter isolation and retry'
+
+# New disabled slot: validate reserved UCI address without starting the device.
+touch "$TEST/down-third"
+run prepared-address awg_backup2 10.8.1.210/32
+reject prepared-address awg_backup2 10.8.1.211/32
+rm "$TEST/down-third"
+reject prepared-address awg_backup2 10.8.1.210/32
