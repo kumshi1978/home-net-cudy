@@ -6,7 +6,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail "root required"
 action=${1:-}
 case "$action:$#" in
-    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1|capabilities:1|accept:1) ;;
+    prepare:3|prepare-upload:3|prepare-upload-target:5|verify:1|promote:1|rollback:1|status:1|capabilities:1|accept:1|set-order:2) ;;
     *) fail "usage: home-net-vpn-router prepare BUNDLE TRUSTED_SHA256SUMS_DIGEST | prepare-upload ID COUNTRY | prepare-upload-target ID COUNTRY SLOT ADDRESS | verify | promote | rollback | status" ;;
 esac
 
@@ -180,6 +180,13 @@ if [ "$action" = prepare ] || [ "$action" = prepare-upload ]; then
     fi
     phase prepared
     exit 0
+fi
+
+if [ "$action" = set-order ]; then
+    [ ! -e "$state" ] || fail "transaction still open"
+    case "$2" in 2|3) ;; *) fail "invalid order size";; esac
+    "$base/home-net-vpn-persist.py" --order "$2"
+    exit $?
 fi
 
 [ -f "$state/phase" ] || fail "transaction missing"

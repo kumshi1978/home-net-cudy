@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import ipaddress
+import json
 import os
 from pathlib import Path
 import re
@@ -93,11 +94,67 @@ def persist(slot,expected):
         try:os.fsync(fd)
         finally:os.close(fd)
 
+FAILOVER=Path('/etc/podkop-awg-failover.conf')
+WATCHER='/usr/bin/podkop-awg-failover'
+ORDER_APPLIED=Path('/etc/home-net/vpn/order-applied.json')
+
+def set_order(size):
+    if size not in ('2','3') or FAILOVER.is_symlink() or not FAILOVER.is_file():raise ValueError('invalid policy')
+    capabilities=subprocess.check_output([WATCHER,'--capabilities'],stderr=subprocess.DEVNULL,timeout=5).decode().split()
+    if list(capabilities)!=list(SLOTS):raise ValueError('unsupported failover')
+    section=Path('/etc/home-net/vpn/podkop-section').read_text().strip()
+    if not re.fullmatch('[A-Za-z0-9_]+',section):raise ValueError('invalid podkop section')
+    active=uci(['-q','get','podkop.'+section+'.interface']).decode().strip()
+    if active not in SLOTS or size=='2' and active=='awg_backup2':raise ValueError('active reserve must remain enabled')
+    if size=='3':
+        hosts=[];addresses=[]
+        for slot in SLOTS:
+            lines=subprocess.check_output(['awg','show',slot,'endpoints'],stderr=subprocess.DEVNULL,timeout=5).decode().splitlines()
+            if len(lines)!=1:raise ValueError('ambiguous peer')
+            host=lines[0].split()[1].rsplit(':',1)[0];ipaddress.IPv4Address(host);hosts.append(host)
+            lines=subprocess.check_output(['ip','-4','-o','address','show','dev',slot],stderr=subprocess.DEVNULL,timeout=5).decode().splitlines()
+            if len(lines)!=1:raise ValueError('ambiguous address')
+            address=ipaddress.IPv4Interface(lines[0].split()[3])
+            if address.network.prefixlen!=32:raise ValueError('invalid address')
+            addresses.append(str(address.ip))
+        if len(set(hosts))!=3 or len(set(addresses))!=3:raise ValueError('duplicate reserve')
+    original=FAILOVER.read_bytes()
+    desired="BACKUP2_AWG='awg_backup2'" if size=='3' else "BACKUP2_AWG=''"
+    lines=original.decode().splitlines();newlines=[line for line in lines if not line.startswith('BACKUP2_AWG=')]+[desired]
+    replacement=('\n'.join(newlines)+'\n').encode()
+    digest=hashlib.sha256(replacement).hexdigest()
+    try:applied=json.loads(ORDER_APPLIED.read_text())
+    except (OSError,ValueError):applied={}
+    if replacement==original and applied=={'size':int(size),'digest':digest}:return
+    fd,name=tempfile.mkstemp(prefix='.home-net-order.',dir=FAILOVER.parent)
+    try:
+        with os.fdopen(fd,'wb') as stream:stream.write(replacement);stream.flush();os.fsync(stream.fileno())
+        if FAILOVER.read_bytes()!=original:raise ValueError('policy changed')
+        os.replace(name,FAILOVER)
+        try:
+            subprocess.run(['/etc/init.d/podkop-awg-failover','restart'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=30)
+            observed=json.loads(subprocess.check_output(['ubus','call','service','list','{"name":"podkop-awg-failover"}'],stderr=subprocess.DEVNULL,timeout=5))
+            instances=observed.get('podkop-awg-failover',{}).get('instances',{})
+            if not any(item.get('running') is True for item in instances.values()):raise ValueError('failover did not start')
+        except (OSError,ValueError,subprocess.SubprocessError):
+            fd,restore=tempfile.mkstemp(prefix='.home-net-order-restore.',dir=FAILOVER.parent)
+            with os.fdopen(fd,'wb') as stream:stream.write(original);stream.flush();os.fsync(stream.fileno())
+            os.replace(restore,FAILOVER)
+            subprocess.run(['/etc/init.d/podkop-awg-failover','restart'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
+            raise
+        if ORDER_APPLIED.is_symlink() or ORDER_APPLIED.parent.is_symlink():raise ValueError('unsafe acknowledgement')
+        fd,marker=tempfile.mkstemp(prefix='.home-net-order-ack.',dir=ORDER_APPLIED.parent)
+        with os.fdopen(fd,'w') as stream:json.dump({'size':int(size),'digest':digest},stream);stream.flush();os.fsync(stream.fileno())
+        os.replace(marker,ORDER_APPLIED)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
 def main():
     os.umask(0o077)
     try:
         if os.geteuid()!=0 or len(sys.argv)!=3:raise ValueError('invalid invocation')
-        persist(sys.argv[1],sys.argv[2])
+        if sys.argv[1]=="--order":set_order(sys.argv[2])
+        else:persist(sys.argv[1],sys.argv[2])
     except (OSError,ValueError,subprocess.SubprocessError):
         print('HOME NET: candidate persistence requires review',file=sys.stderr);return 1
     return 0
