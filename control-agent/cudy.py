@@ -367,7 +367,7 @@ def poll_once():
             if not SLOT_REBINDER.is_file(): raise ValueError('slot rebinder unavailable')
             result=subprocess.run([sys.executable,str(SLOT_REBINDER),canonical(plan['rebind']).decode()],
                                   stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=240)
-            if result.returncode:
+            if result.returncode not in (0,75):
                 config['binding_failed_revision']=plan['revision'];save_config(config)
             return
         if plan and plan.get("order_size") in (2,3):

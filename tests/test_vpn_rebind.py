@@ -12,6 +12,11 @@ def fixture():
                 expected={slot:dict(host='192.0.2.'+str(i+1),port=4340,address='10.8.1.'+str(i+1)+'/32',fingerprint=str(i)*64) for i,slot in enumerate(slots)})
 
 class Rebind(unittest.TestCase):
+    def test_busy_maintenance_defers_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);lock=root/'lock';lock.touch()
+            with patch.multiple(m,ROOT=root,LOCK=lock,NETWORK=root/'network',PODKOP=root/'podkop',FAILOVER=root/'failover'),patch('sys.argv',['rebind',json.dumps(fixture())]),patch.object(m.os,'geteuid',return_value=0),patch.object(m.fcntl,'flock',side_effect=BlockingIOError),patch.object(m.time,'sleep'),patch.object(m,'apply') as apply:
+                self.assertEqual(m.main(),75);apply.assert_not_called()
     def test_permutation_preserves_endpoint_identity_and_rejects_duplicates(self):
         spec=fixture();self.assertEqual(m.validate(spec),'awg_main')
         for edit in (lambda s:s['mapping'].update(awg_backup='awg_backup'),

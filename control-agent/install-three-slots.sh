@@ -31,7 +31,7 @@ if [ -f /usr/bin/home-net-vpn-router ]; then
 fi
 if [ -f /usr/bin/home-net-vpn-rebind.py ]; then
     current=$(sha256sum /usr/bin/home-net-vpn-rebind.py | cut -d ' ' -f1)
-    [ "$current" = 7f3966307f08c598bae97e1000efea810212e1f75563d9bce22eb81dde49d8ab ] || fail 'custom slot rebinder preserved; review required'
+    case "$current" in 7f3966307f08c598bae97e1000efea810212e1f75563d9bce22eb81dde49d8ab|b65f196c805abcbad0b377aa437c6cd66ecb662cf0a95cc54248c8acf75fa254) ;; *) fail 'custom slot rebinder preserved; review required' ;; esac # 'custom slot rebinder preserved; review required'
 fi
 work=$(mktemp -d /tmp/home-net-controller.XXXXXX)
 trap 'rm -rf "$work"' EXIT
@@ -45,7 +45,7 @@ echo '9d99142b237ebf221b8acd18604601dc954c0e71bb42f9f06ef700698bceb745  '"$work/
 wget -q -T 60 -O "$work/home-net-vpn-persist.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-persist.py" || fail 'download failed'
 echo '98454b13b657d7ce7ffd5986d38cb91acf8ccadf17e3aaa455115f5d25fac29b  '"$work/home-net-vpn-persist.py" | sha256sum -c - || fail 'integrity mismatch'
 wget -q -T 60 -O "$work/home-net-vpn-rebind.py" "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$ref/scripts/home-net-vpn-rebind.py" || fail 'download failed'
-echo '7f3966307f08c598bae97e1000efea810212e1f75563d9bce22eb81dde49d8ab  '"$work/home-net-vpn-rebind.py" | sha256sum -c - || fail 'integrity mismatch'
+echo 'b65f196c805abcbad0b377aa437c6cd66ecb662cf0a95cc54248c8acf75fa254  '"$work/home-net-vpn-rebind.py" | sha256sum -c - || fail 'integrity mismatch'
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/home-net-vpn-rebind.py"
 for file in home-net-vpn-router home-net-vpn-cudy-adapter home-net-vpn-manifest-validate; do sh -n "$work/$file" || fail 'invalid shell'; done
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$work/home-net-vpn-persist.py"
