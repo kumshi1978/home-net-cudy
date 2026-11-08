@@ -7,16 +7,22 @@ config=/etc/home-net/vpn
 backup=$config/transaction/backup
 verb=$1
 shift
+if [ "$verb" = capabilities ]; then
+    printf '%s\n' 'awg_main awg_backup awg_backup2'
+    exit 0
+fi
 
 slot() {
-    case "$1" in awg_main|awg_backup) ;; *) return 1 ;; esac
+    case "$1" in awg_main|awg_backup|awg_backup2) ;; *) return 1 ;; esac
 }
 
 quiescent() {
     # The supported Failover release shares the controller's inherited lock.
-    if [ -f "$config/failover-lock-version" ] &&
-        grep -Fxq '1.4.2' "$config/failover-lock-version" &&
-        grep -Fxq "INSTALLED_VERSION='1.4.2'" /etc/podkop-awg-failover.conf 2>/dev/null &&
+    contract=$(cat "$config/failover-lock-version" 2>/dev/null || true)
+    supported=0
+    case "$contract" in 1.4.2|1.5.0) supported=1 ;; esac
+    if [ "$supported" = 1 ] &&
+        grep -Fxq "INSTALLED_VERSION='$contract'" /etc/podkop-awg-failover.conf 2>/dev/null &&
         [ /proc/self/fd/9 -ef /var/run/home-net-vpn-maintenance.lock ] &&
         flock -n 9; then
         return 0
@@ -122,8 +128,7 @@ probe() {
         END { exit (NR != 1 || bad) }
     ' || return 1
     if [ -n "$2" ]; then
-        country=$(curl -q -4 --noproxy '*' --interface "if!$1" --connect-timeout 5 \
-            --max-time 10 --max-filesize 128 -fsS https://ipinfo.io/country) || return 1
+        country=$(podkop-country-lookup "$1") || return 1
         [ "$country" = "$2" ] || return 1
     fi
 }
@@ -148,6 +153,18 @@ matches_candidate() {
 quiescent
 case "$verb:$#" in
     active:0) active ;;
+    prepared-address:2)
+        slot "$1"
+        [ "$(active)" != "$1" ]
+        if ip link show dev "$1" >/dev/null 2>&1; then exit 1; fi
+        [ "$(uci -q get "network.$1.proto")" = amneziawg ]
+        [ "$(uci -q get "network.$1.home_net_prepared")" = 1 ]
+        [ "$(uci -q get "network.$1.auto")" = 0 ]
+        [ "$(uci -q get "network.$1.defaultroute")" = 0 ]
+        [ "$(uci -q get "network.$1.peerdns")" = 0 ]
+        [ "$(uci -q get "network.$1.addresses")" = "$2" ]
+        ! uci -q show network | grep -q "=amneziawg_$1$"
+        ;;
     validate:2)
         slot "$1"
         validate "$2"
@@ -157,6 +174,29 @@ case "$verb:$#" in
         slot "$1"; slot "$2"
         [ "$(active)" = "$1" ]
         healthy
+        if ! ip link show dev "$2" >/dev/null 2>&1; then
+            [ "$(uci -q get "network.$2.proto")" = amneziawg ]
+            [ "$(uci -q get "network.$2.auto")" = 0 ]
+            [ "$(uci -q get "network.$2.defaultroute")" = 0 ]
+            [ "$(uci -q get "network.$2.peerdns")" = 0 ]
+            # An existing disabled peer may carry unknown routes; do not start it blindly.
+            ! uci -q show network | grep -q "=amneziawg_$2$"
+            : >"$3/target-was-down"
+            if ! timeout 15 ifup "$2"; then
+                timeout 15 ifdown "$2" || true
+                exit 1
+            fi
+            # netifd acknowledges ifup before creating the device.
+            attempts=0
+            until awg showconf "$2" >/dev/null 2>&1; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge 15 ]; then
+                    timeout 15 ifdown "$2" || true
+                    exit 1
+                fi
+                sleep 1
+            done
+        fi
         awg showconf "$2" >"$3/target.conf"
         [ -s "$3/target.conf" ]
         conf=$(cat "$3/target.conf")
@@ -178,6 +218,12 @@ case "$verb:$#" in
         matches_candidate "$2"
         probe "$2" "$3"
         healthy
+        ;;
+    persist:2)
+        slot "$1"; slot "$2"
+        [ "$(active)" = "$1" ]
+        matches_candidate "$2"
+        /usr/bin/home-net-vpn-persist.py "$2" "$(cat "$backup/candidate.sha256")"
         ;;
     promote:2)
         slot "$1"; slot "$2"
@@ -202,12 +248,14 @@ case "$verb:$#" in
             switch_to "$1"
         fi
         [ "$(active)" = "$1" ]
+        if [ -f "$3/network.before-persist" ]; then /usr/bin/home-net-vpn-persist.py --restore; fi
         awg syncconf "$2" "$3/target.conf"
         ;;
     check-restored:3)
         slot "$1"; slot "$2"
         [ "$(active)" = "$1" ]
         [ "$(fingerprint "$2")" = "$(cat "$3/baseline.sha256")" ]
+        if [ -f "$3/target-was-down" ]; then timeout 15 ifdown "$2"; fi
         probe "$1" ""
         healthy
         ;;

@@ -14,9 +14,23 @@ case "${0##*/}:$1" in
     ubus:call)
         if [ -e "$TEST/conflict" ]; then echo '{"podkop-awg-failover":{}}'; else echo '{}'; fi ;;
     uci:-q)
-        case "$3" in *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
+        case "$3" in
+          network.awg_backup2.proto) echo amneziawg ;;
+          network.awg_backup2.home_net_prepared) echo 1 ;;
+          network.awg_backup2.auto|network.awg_backup2.defaultroute|network.awg_backup2.peerdns) echo 0 ;;
+          network.awg_backup2.addresses) echo 10.8.1.210/32 ;;
+          network) echo network.awg_backup2=interface ;;
+          *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
-    awg:showconf) cat "$TEST/$2" ;;
+    podkop-country-lookup:*) echo DE ;;
+    ip:link) [ ! -f "$TEST/down-third" ] ;;
+    awg:showconf)
+        if [ "$2" = awg_backup2 ] && [ -e "$TEST/down-third" ]; then exit 1; fi
+        cat "$TEST/$2" ;;
+    timeout:15)
+        if [ "$2" = ifup ]; then touch "$TEST/starting-third"
+        elif [ "$2" = ifdown ]; then touch "$TEST/down-third"; echo down >>"$TEST/down-events"
+        else exit 1; fi ;;
     awg:syncconf) cp "$3" "$TEST/$2" ;;
     awg:show)
         if [ "$3" = endpoints ]; then printf 'fixture 192.0.2.2:1234\n'
@@ -38,12 +52,19 @@ case "${0##*/}:$1" in
             exit 1
         fi
         [ ! -e "$TEST/unhealthy" ] ;;
-    sleep:1) exit 0 ;;
+    sleep:1)
+        if [ -e "$TEST/starting-third" ]; then
+            echo wait >>"$TEST/device-waits"
+            if [ ! -e "$TEST/never-ready" ]; then
+                rm "$TEST/starting-third" "$TEST/down-third"
+                printf 'baseline\n' >"$TEST/awg_backup2"
+            fi
+        fi ;;
     *) exit 1 ;;
 esac
 EOF
 chmod +x "$tmp/bin/mock"
-for cmd in ubus uci awg curl pidof timeout home-net-install-verify sleep; do
+for cmd in ubus uci awg curl pidof timeout home-net-install-verify sleep ip podkop-country-lookup; do
     cp "$tmp/bin/mock" "$tmp/bin/$cmd"
 done
 export PATH="$tmp/bin:$PATH"
@@ -125,3 +146,23 @@ run check-restored awg_main awg_backup "$backup"
 test "$(cat "$tmp/readiness")" = retry
 test "$(wc -l <"$tmp/restarts")" -eq 3
 echo 'PASS: Cudy adapter isolation and retry'
+
+# New disabled slot: validate reserved UCI address without starting the device.
+touch "$TEST/down-third"
+run prepared-address awg_backup2 10.8.1.210/32
+reject prepared-address awg_backup2 10.8.1.211/32
+rm "$TEST/down-third"
+reject prepared-address awg_backup2 10.8.1.210/32
+
+# ifup returns before netifd creates the device: wait without touching active VPN.
+touch "$TEST/down-third"
+run snapshot awg_main awg_backup2 "$backup"
+test -f "$backup/target-was-down"
+test -s "$TEST/device-waits"
+test "$(cat "$TEST/active")" = awg_main
+# A device which never becomes ready is brought down and rejected in bounded time.
+touch "$TEST/down-third" "$TEST/never-ready"
+reject snapshot awg_main awg_backup2 "$backup"
+test -s "$TEST/down-events"
+test "$(wc -l <"$TEST/device-waits")" -eq 15
+echo 'PASS: asynchronous prepared-slot startup and timeout cleanup'

@@ -1,0 +1,17 @@
+name: Three-slot controller
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  controller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: sh -n scripts/home-net-vpn-router && sh -n scripts/home-net-vpn-cudy-adapter
+      - run: sh tests/test-vpn-router.sh
+      - run: sh tests/test-vpn-cudy-adapter.sh
+      - run: sh tests/test-home-net-vpn-manifest-validate.sh
+      - run: python3 -m unittest discover -s tests -p test_vpn_persist.py
+      - run: python3 -m unittest discover -s tests -p test_vpn_rebind.py
