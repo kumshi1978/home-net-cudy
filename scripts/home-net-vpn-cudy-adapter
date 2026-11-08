@@ -182,10 +182,20 @@ case "$verb:$#" in
             # An existing disabled peer may carry unknown routes; do not start it blindly.
             ! uci -q show network | grep -q "=amneziawg_$2$"
             : >"$3/target-was-down"
-            if ! timeout 15 ifup "$2" || ! awg showconf "$2" >/dev/null; then
+            if ! timeout 15 ifup "$2"; then
                 timeout 15 ifdown "$2" || true
                 exit 1
             fi
+            # netifd acknowledges ifup before creating the device.
+            attempts=0
+            until awg showconf "$2" >/dev/null 2>&1; do
+                attempts=$((attempts + 1))
+                if [ "$attempts" -ge 15 ]; then
+                    timeout 15 ifdown "$2" || true
+                    exit 1
+                fi
+                sleep 1
+            done
         fi
         awg showconf "$2" >"$3/target.conf"
         [ -s "$3/target.conf" ]
