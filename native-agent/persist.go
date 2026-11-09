@@ -80,7 +80,7 @@ func parseAWG(conf []byte) (map[string]string, error) {
 	}
 	for k, v := range values {
 		if has([]string{"I1", "I2", "I3", "I4", "I5"}, k) {
-			if !valid(`[A-Za-z0-9<>:_.,=+ /-]{1,2048}`, v) {
+			if len(v) < 1 || len(v) > 2048 || !valid(`[A-Za-z0-9<>:_.,=+ /-]+`, v) {
 				return nil, errStopped
 			}
 		} else if !has([]string{"PrivateKey", "PublicKey", "PresharedKey", "Endpoint", "AllowedIPs", "AdvancedSecurity"}, k) && !valid(`[0-9]+`, v) {

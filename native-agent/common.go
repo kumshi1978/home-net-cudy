@@ -69,7 +69,10 @@ func (a *app) text(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(b)), e
 }
 func hash(b []byte) string         { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
-func valid(pattern, s string) bool { return regexp.MustCompile("^(?:" + pattern + ")$").MatchString(s) }
+func valid(pattern, s string) bool {
+	r, err := regexp.Compile("^(?:" + pattern + ")$")
+	return err == nil && r.MatchString(s)
+}
 func has(xs []string, x string) bool {
 	for _, v := range xs {
 		if v == x {
