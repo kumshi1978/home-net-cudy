@@ -233,18 +233,12 @@ health_value() {
 }
 
 evaluate_bootstrap_health() {
-    health_status="$(health_value STATUS)"
-    BOOTSTRAP_HEALTH_RESULT="$health_status"
-    [ "$health_status" = "OK" ] || {
-        [ "$health_status" = "UNKNOWN" ] || BOOTSTRAP_HEALTH_RESULT=FAIL
-        return 1
-    }
+    BOOTSTRAP_HEALTH_RESULT="$(health_value STATUS)"
+    case "$BOOTSTRAP_HEALTH_RESULT" in OK|UNKNOWN|FAIL) ;; *) BOOTSTRAP_HEALTH_RESULT=UNKNOWN ;; esac
 
     for required_health in \
         PODKOP=RUNNING \
-        SING_BOX=RUNNING \
-        FAKEIP=OK \
-        SERVICE_CHECK=OK
+        SING_BOX=RUNNING
     do
         health_key=${required_health%%=*}
         health_expected=${required_health#*=}
@@ -253,7 +247,6 @@ evaluate_bootstrap_health() {
             return 1
         }
     done
-    BOOTSTRAP_HEALTH_RESULT=OK
     return 0
 }
 
@@ -384,7 +377,7 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != 1 ]; then
             wait_for_fresh_bootstrap_health "$before_last" "$before_started" ||
                 fail "SSH policy applied but fresh monitoring health is not OK"
-            write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+            write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none "$BOOTSTRAP_HEALTH_RESULT"
         fi
         echo 'HOME NET: stable SSH policy patch complete.'
         exit 0
@@ -501,7 +494,7 @@ install_control_agent
 if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     printf '\n===== WAIT FOR FRESH MONITORING CYCLE =====\n'
     if wait_for_fresh_bootstrap_health "$BOOTSTRAP_BEFORE_LAST" "$BOOTSTRAP_BEFORE_STARTED"; then
-        write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+        write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none "$BOOTSTRAP_HEALTH_RESULT"
     else
         write_bootstrap_state "$PREVIOUS_ACTIVE_VERSION" FAILED verification \
             'fresh bootstrap health did not become OK' "$BOOTSTRAP_HEALTH_RESULT"

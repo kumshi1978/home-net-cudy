@@ -307,20 +307,20 @@ case_controlled_success() {
 case_controlled_health_fail() {
     reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
     MOCK_HEALTH_STATUS=FAIL
-    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    run_updater apply; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.2
-    assert_state ACTIVE_VERSION 1.5.1
-    assert_state UPDATE_STATUS FAILED
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_state UPDATE_STATUS OK
     assert_state LAST_HEALTH_STATUS FAIL
 }
 
 case_controlled_health_unknown() {
     reset_case; write_release 1.5.2 false false v1.5.2 CONTROLLED controlled_bundle_activation none; write_state 1.5.1
     MOCK_HEALTH_STATUS=UNKNOWN
-    run_updater apply; [ "$RUN_RC" -ne 0 ] || exit 1
+    run_updater apply; assert_rc 0
     assert_state INSTALLED_VERSION 1.5.2
-    assert_state ACTIVE_VERSION 1.5.1
-    assert_state UPDATE_STATUS FAILED
+    assert_state ACTIVE_VERSION 1.5.2
+    assert_state UPDATE_STATUS OK
     assert_state LAST_HEALTH_STATUS UNKNOWN
 }
 
@@ -534,6 +534,7 @@ case_critical_auto_never_installs() {
 }
 case_manual_health_cannot_be_forced() {
     reset_case; enable_new_model; write_release 1.5.2 false false; write_state 1.5.1; write_health FAIL before
+    sed -i 's/SING_BOX=RUNNING/SING_BOX=FAIL/' "$TMP/health.state"
     HOME_NET_FORCE=1 run_updater apply
     [ "$RUN_RC" -ne 0 ]; assert_state INSTALLED_VERSION 1.5.1
     assert_output 'pre-install health is FAIL'

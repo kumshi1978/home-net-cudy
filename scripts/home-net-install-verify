@@ -90,11 +90,8 @@ services() {
     "$init" status || fail 'sing-box status disagrees with running'
     echo 'PASS: Podkop initialized, nft/routing present, sing-box running'
 }
-health() {
+health_timestamps() {
     [ -r "$HEALTH" ] || fail 'health state missing'
-    for pair in STATUS=OK PODKOP=RUNNING SING_BOX=RUNNING FAKEIP=OK SERVICE_CHECK=OK; do
-        grep -Fxq "$pair" "$HEALTH" || fail "health requires $pair"
-    done
     stamp=$(sed -n 's/^LAST_CHECK=//p' "$HEALTH")
     [ -n "$stamp" ] || fail 'health timestamp missing'
     epoch=$(date -d "$stamp" +%s 2>/dev/null) || fail 'invalid health timestamp'
@@ -110,7 +107,25 @@ health() {
         case "$boundary" in ''|*[!0-9]*) fail 'invalid initialization boundary' ;; esac
         [ "$started_epoch" -gt "$boundary" ] && [ "$epoch" -gt "$boundary" ] || fail 'health cycle predates initialization'
     fi
+}
+health() {
+    for pair in STATUS=OK PODKOP=RUNNING SING_BOX=RUNNING FAKEIP=OK SERVICE_CHECK=OK; do
+        grep -Fxq "$pair" "$HEALTH" || fail "health requires $pair"
+    done
+    health_timestamps
     echo 'PASS: health OK (lifecycle checked separately)'
+}
+installation() {
+    runtime
+    luci
+    services
+    health_timestamps
+    for pair in PODKOP=RUNNING SING_BOX=RUNNING; do
+        grep -Fxq "$pair" "$HEALTH" || fail "installation requires $pair"
+    done
+    status=$(sed -n 's/^STATUS=//p' "$HEALTH")
+    case "$status" in OK) ;; *) echo "WARN: network health is ${status:-UNKNOWN}; VPN availability does not gate installation" >&2 ;; esac
+    echo 'PASS: local installation and fresh Monitoring cycle verified'
 }
 case "${1:-all}" in
     luci) luci ;;
@@ -119,5 +134,6 @@ case "${1:-all}" in
     health) health ;;
     lifecycle) services; health ;;
     all) runtime; luci; services; health ;;
-    *) fail 'usage: home-net-install-verify {runtime|luci|services|health|lifecycle|all}' ;;
+    installation) installation ;;
+    *) fail 'usage: home-net-install-verify {runtime|luci|services|health|lifecycle|all|installation}' ;;
 esac

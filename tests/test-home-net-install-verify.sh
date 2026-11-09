@@ -115,7 +115,7 @@ grep -q 'fixture: LuCI copy failed' "$TMP/partial-output"
 sh "$REPO/scripts/home-net-install-verify" runtime
 echo 'PASS early LuCI failure leaves every copied runtime helper/init executable'
 (umask 077; sh "$TMP/install.ready") > "$TMP/output"
-[ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/output")" = 1 ]
+[ "$(grep -c '^Waiting for a completed local Monitoring cycle' "$TMP/output")" = 1 ]
 if grep -q 'FAIL: health cycle predates initialization' "$TMP/output"; then exit 1; fi
 echo 'PASS health retries report waiting once and suppress intermediate FAIL noise'
 sh "$REPO/scripts/home-net-install-verify" all
@@ -131,7 +131,7 @@ printf "INSTALLED_VERSION='1.6.0'\nACTIVE_VERSION='1.6.0'\n" > "$TMP/root/etc/ho
 cp "$TMP/root/etc/home-net-update.state" "$TMP/version.before"
 MOCK_FIRST_CYCLE_COMPLETE=1 MOCK_NO_NEW_HEALTH=1 MOCK_RPCD_DELAY=5 sh "$TMP/install.ready" > "$TMP/race-output" 2>&1
 grep -q 'HOME NET Podkop Monitor v1.7.8 installed' "$TMP/race-output"
-if grep -q '^Waiting for a completed healthy cycle' "$TMP/race-output"; then exit 1; fi
+if grep -q '^Waiting for a completed local Monitoring cycle' "$TMP/race-output"; then exit 1; fi
 cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS upgrade 1.6.0: first post-restart cycle accepted before delayed rpcd; baseline record preserved'
 # Reproduce rpcd's disappearing output reader with a real FIFO. rpcd ignores
@@ -165,7 +165,7 @@ cmp -s "$TMP/version.before" "$TMP/root/etc/home-net-update.state"
 echo 'PASS LuCI update keeps rpcd reader alive, completes fresh verification and preserves version ownership'
 if MOCK_NO_NEW_HEALTH=1 MOCK_WAIT_STEP=300 sh "$TMP/install.ready" > "$TMP/timeout-output" 2>&1; then exit 1; fi
 grep -q 'verification timed out (600-second deadline' "$TMP/timeout-output"
-[ "$(grep -c '^Waiting for a completed healthy cycle' "$TMP/timeout-output")" = 1 ]
+[ "$(grep -c '^Waiting for a completed local Monitoring cycle' "$TMP/timeout-output")" = 1 ]
 grep -q 'WAIT: no new completed health cycle available' "$TMP/timeout-output"
 [ -f "$TMP/root/root/backup-podkop-install/install-verification.log" ]
 # Restore the fixture's independently completed cycle for later checks.
@@ -231,3 +231,21 @@ before=$(sha256sum "$TMP/root/usr/bin/home-net-status")
 if sh "$TMP/install.ready" > "$TMP/stopped-output" 2>&1; then exit 1; fi
 [ "$before" = "$(sha256sum "$TMP/root/usr/bin/home-net-status")" ]
 echo 'PASS missing/0600 LuCI, FakeIP/stale health and dead proxy fail closed'
+
+# Real installation must succeed with unavailable VPN/external DNS probes,
+# retain their diagnostic state, and still reject broken local software.
+touch "$TMP/root/sing-box.running"
+cp "$REPO/luci/view/home-net/vpn.js" "$TMP/root/www/luci-static/resources/view/home-net/vpn.js"
+chmod 0644 "$TMP/root/www/luci-static/resources/view/home-net/vpn.js"
+for network_status in UNKNOWN FAIL; do
+ stamp=$(date '+%F %T')
+ printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=FAIL\nSERVICE_CHECK=SKIPPED\nCHECK_STARTED=%s\nLAST_CHECK=%s\n' "$network_status" "$stamp" "$stamp" >"$HOME_NET_VERIFY_HEALTH"
+ sh "$TMP/install.ready" >"$TMP/vpn-down-output" 2>&1
+ grep -q 'local installation and fresh Monitoring cycle verified' "$TMP/vpn-down-output"
+ grep -qx "STATUS=$network_status" "$HOME_NET_VERIFY_HEALTH"
+ if sh "$REPO/scripts/home-net-install-verify" health >/dev/null 2>&1; then exit 1; fi
+ echo "PASS real Monitoring install succeeds with network $network_status and preserves diagnostics"
+done
+sed -i 's/SING_BOX=RUNNING/SING_BOX=FAIL/' "$HOME_NET_VERIFY_HEALTH"
+if sh "$REPO/scripts/home-net-install-verify" installation >/dev/null 2>&1; then exit 1; fi
+echo 'PASS installation still rejects failed local service state'
