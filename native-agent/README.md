@@ -14,10 +14,11 @@ decryption invocation. It does not replace Failover, Monitoring or firmware.
 
 ## Candidate status
 
-Release candidate 0.1.0-rc1, not installed on hardware. Linux race-enabled tests,
-installer fault tests, go vet and the static ARM64 build passed at source commit
-8450719c9b5433a04febef61a6d5dbe02612a9cb. The binary measured 6,881,404 bytes;
-each new candidate must pass CI again. Existing Python files remain in
+Native agent 1.7.10, source 0c8fd86cbd9897c665cc497ba1e59c6d4e0cf581, passed
+Linux race-enabled tests, installer fault tests, go vet and static ARM64 build.
+The full bundle passed 21 regression suites and installation on the main Cudy;
+see docs/releases/v1.7.10-validation.md for exact boundaries and pending backup
+and panel job acceptance. Existing Python files remain in
 the repository as regression oracles, but are not deployed by the native package.
 Do not infer installation success from compilation or from synthetic crypto tests.
 
@@ -69,7 +70,7 @@ transaction state, maintenance lock and space for staging plus backups. Its
 512 KiB allowance is for completing the current install, not a promise of future
 update capacity; the user explicitly waived a future-update reserve.
 
-It backs up old managed code, preserves private identities and configuration,
+It retains hard-linked backups of old managed code, preserves private identities and configuration,
 stages code before stopping an old agent, and can restore old code on failure.
 The installed agent can execute existing panel jobs; review assignment/plan and
 transaction state before enabling it on a real router. Installer startup itself
