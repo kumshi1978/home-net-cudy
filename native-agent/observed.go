@@ -32,7 +32,13 @@ func (a *app) observedInterfaces() object {
   disabled, disabledErr := text("uci", "-q", "get", "network."+slot+".disabled")
   if disabledErr==nil && disabled=="1" { info["state"]="disabled";continue }
   entry, present := entries[slot]
-  if !present { info["state"] = "missing"; continue }
+  if !present {
+   kind,e:=text("uci","-q","get","network."+slot)
+   if e==nil && kind=="interface" { info["state"]="down" } else if e==nil {
+    info["error"]="interface_status_unavailable"
+   } else { info["state"]="missing" }
+   continue
+  }
   switch {
   case entry["up"] == true: info["state"] = "up"
   case entry["up"] == false: info["state"] = "down"

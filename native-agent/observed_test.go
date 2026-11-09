@@ -65,6 +65,17 @@ func TestObservedErrorsNeverBecomeVerified(t *testing.T) {
  }
 }
 
+func TestConfiguredInactiveInterfaceDoesNotDisappear(t *testing.T) {
+ a:=observedFixture(t,"missing",1,999,false)
+ original:=a.run
+ a.run=func(d time.Duration,input []byte,name string,args ...string)([]byte,error){
+  if name=="uci" && strings.Join(args," ")=="-q get network.awg_main" {return []byte("interface"),nil}
+  return original(d,input,name,args...)
+ }
+ info:=obj(obj(a.observedInterfaces()["slots"])["awg_main"])
+ if info["state"]!="down" || info["verified"]!=false {t.Fatal(info)}
+}
+
 func TestAppliedRevisionRequiresUnchangedProfileAndOrder(t *testing.T) {
  a := observedFixture(t,"up",1,999,false)
  mkdir(a.p("/etc"))
