@@ -23,7 +23,8 @@ policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.co
 policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 case "$policy_tag:$policy_rollout" in
     v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.9:manual|v1.7.9:canary|v1.7.9:fleet) ;;
-    *) echo "unexpected policy for the 1.7.4 rollout-test bundle" >&2; exit 1 ;;
+    v1.7.10:manual) ;;
+    *) echo "unexpected release rollout policy" >&2; exit 1 ;;
 esac
 
 grep -Fq 'HOME_NET_SKIP_VERSION_RECORD' "$ROOT/install-all.sh"
