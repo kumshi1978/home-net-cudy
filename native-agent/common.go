@@ -41,6 +41,9 @@ func newApp(root string) *app {
 	return a
 }
 func (a *app) p(s string) string {
+	// OpenWrt deliberately links /var to /tmp. Resolve only this fixed system
+	// alias; arbitrary symlink ancestors remain forbidden for private state.
+	if s=="/var/run" { s="/tmp/run" } else if strings.HasPrefix(s,"/var/run/") { s="/tmp/run/"+strings.TrimPrefix(s,"/var/run/") }
 	if a.root == "" {
 		return s
 	}

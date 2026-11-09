@@ -44,6 +44,7 @@ func signature(config object, v any, sig string) bool {
 	want, _ := hex.DecodeString(sig)
 	return hmac.Equal(h.Sum(nil), want)
 }
+func bearerToken(s string)bool{if len(s)<32||len(s)>512{return false};for _,r:=range s{if r<=32||r>=127{return false}};return true}
 func (a *app) call(config object, action string, body any) (object, error) {
 	ip := str(config["server_ip"])
 	device := str(config["wan_device"])
@@ -56,7 +57,7 @@ func (a *app) call(config object, action string, body any) (object, error) {
 	}
 	path := "/agent/register"
 	if action != "register" {
-		if !valid(`[a-z0-9-]{1,80}`, id) || !has([]string{"poll", "result"}, action) || !valid(`[a-f0-9]{64}`, str(config["token"])) {
+		if !valid(`[a-z0-9-]{1,80}`, id) || !has([]string{"poll", "result"}, action) || !bearerToken(str(config["token"])) {
 			return nil, errStopped
 		}
 		path = "/agent/" + id + "/" + action
