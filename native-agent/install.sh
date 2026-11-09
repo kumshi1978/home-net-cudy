@@ -60,7 +60,7 @@ backup_bytes=0
 for file in $payloads; do n=$(wc -c <"$file"); payload_bytes=$((payload_bytes+n)); done
 for target in $targets; do
     if [ -f "$target" ]; then
-        n=$(wc -c <"$target"); backup_bytes=$((backup_bytes+n))
+        # The private backup retains this inode with a hard link before rename.
         current=$(sha256sum "$target"); current=${current%% *}
         reviewed=0
         case "$target:$current" in
@@ -72,6 +72,8 @@ for target in $targets; do
 done
 free_kib=$(df -Pk /overlay | awk 'NR==2 {print $4}')
 case "$free_kib" in ''|*[!0-9]*) fail 'cannot determine writable space' ;; esac
+# The allowance includes hard-link metadata; link failure aborts before stopping
+# the old agent. Never fall back to an unbudgeted binary-sized copy.
 # Current-install allowance only. The user explicitly waived a future-update
 # reserve; do not silently require 4 MiB or attempt to consume all free flash.
 required_kib=$(( (payload_bytes+backup_bytes+1023)/1024+512 ))
@@ -84,7 +86,7 @@ backup=$(mktemp -d /etc/home-net/native-agent-backups/install.XXXXXX)
 mkdir "$backup/files"
 for target in $targets; do
     printf '%s\n' "$target" >>"$backup/targets"
-    if [ -f "$target" ]; then mkdir -p "$backup/files/$(dirname "${target#/}")"; cp -p "$target" "$backup/files/${target#/}"; fi
+    if [ -f "$target" ]; then mkdir -p "$backup/files/$(dirname "${target#/}")"; ln "$target" "$backup/files/${target#/}" || fail 'cannot retain existing code without copying'; fi
 done
 for file in /etc/config/network /etc/config/podkop /etc/podkop-awg-failover.conf; do [ ! -f "$file" ] || sha256sum "$file"; done >"$backup/protected.sha256"
 set -- $payloads

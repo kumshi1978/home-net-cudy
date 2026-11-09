@@ -102,3 +102,21 @@ test -f "$FIXTURE/running"
 cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
 cmp "$TMP/podkop.before" "$FIXTURE/etc/config/podkop"
 echo 'PASS installation preserves protected configuration and starts only the agent'
+
+# Simulate a large already-installed native agent. Its immutable old inode must
+# be retained without reserving another binary-sized flash allocation.
+dd if=/dev/zero bs=1024 count=1024 2>/dev/null | tr '\000' '#' >>"$FIXTURE/usr/sbin/vpn-control-cudy"
+cp "$FIXTURE/usr/sbin/vpn-control-cudy" "$TMP/old-native"
+for file in "$FIXTURE/usr/sbin/vpn-control-cudy" "$FIXTURE/usr/bin/home-net-vpn-router" "$FIXTURE/etc/home-net/vpn/adapter" "$FIXTURE/usr/bin/home-net-vpn-manifest-validate" "$FIXTURE/usr/bin/home-net-vpn-persist" "$FIXTURE/etc/init.d/vpn-control-cudy"; do sha256sum --text "$file"; done >"$FIXTURE/etc/home-net/native-agent-files.sha256"
+if FREE_KIB=1024 MOCK_START_FAIL=1 run --install; then echo 'upgrade start failure ignored' >&2; exit 1; fi
+cmp "$TMP/old-native" "$FIXTURE/usr/sbin/vpn-control-cudy"
+cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
+echo 'PASS failed native upgrade restores existing code'
+before_inode=$(ls -i "$FIXTURE/usr/sbin/vpn-control-cudy" | awk '{print $1}')
+FREE_KIB=1024 run --install
+backup=$(sed -n 's/.*backup: \([^;]*\);.*/\1/p' "$TMP/output")
+test -n "$backup"
+after_inode=$(ls -i "$backup/files/${FIXTURE#/}/usr/sbin/vpn-control-cudy" | awk '{print $1}')
+test "$before_inode" = "$after_inode"
+cmp "$TMP/old-native" "$backup/files/${FIXTURE#/}/usr/sbin/vpn-control-cudy"
+echo 'PASS native upgrade keeps a hard-linked rollback copy within the current-install budget'
