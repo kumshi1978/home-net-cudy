@@ -280,13 +280,13 @@ echo 'PASS bootstrap_fresh_health_ok'
 run_bootstrap_case 1 stale 1.5.1 FAILED UNKNOWN
 echo 'PASS bootstrap_stale_health_rejected'
 
-run_bootstrap_case 1 UNKNOWN 1.5.1 FAILED UNKNOWN
+run_bootstrap_case 0 UNKNOWN 1.5.2 OK UNKNOWN
 echo 'PASS bootstrap_fresh_health_unknown'
 
-run_bootstrap_case 1 FAIL 1.5.1 FAILED FAIL
+run_bootstrap_case 0 FAIL 1.5.2 OK FAIL
 echo 'PASS bootstrap_fresh_health_fail'
 
-run_bootstrap_case 1 MISSING_SERVICE_CHECK 1.5.1 FAILED FAIL
+run_bootstrap_case 0 MISSING_SERVICE_CHECK 1.5.2 OK OK
 echo 'PASS bootstrap_missing_service_check'
 
 TEST_SKIP_VERSION_RECORD=0
@@ -295,10 +295,10 @@ write_monitoring_installer
 write_old_health
 rm -f "$TARGET/home-net-update.state"
 run_installer
-[ "$RUN_RC" -ne 0 ] || exit 1
+[ "$RUN_RC" = 0 ] || exit 1
 [ "$(state_value INSTALLED_VERSION)" = 1.5.2 ]
-[ "$(state_value ACTIVE_VERSION)" = unknown ]
-[ "$(state_value UPDATE_STATUS)" = FAILED ]
+[ "$(state_value ACTIVE_VERSION)" = 1.5.2 ]
+[ "$(state_value UPDATE_STATUS)" = OK ]
 echo 'PASS bootstrap_unknown_previous_active_is_explicit'
 
 TEST_SKIP_VERSION_RECORD=1

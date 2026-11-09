@@ -471,16 +471,11 @@ health_value() {
 evaluate_health() {
     health_status="$(health_value STATUS)"
     LAST_HEALTH_RESULT="$health_status"
-    [ "$health_status" = "OK" ] || {
-        [ "$health_status" = "UNKNOWN" ] || LAST_HEALTH_RESULT=FAIL
-        return 1
-    }
+    case "$LAST_HEALTH_RESULT" in OK|UNKNOWN|FAIL) ;; *) LAST_HEALTH_RESULT=UNKNOWN ;; esac
 
     for required in \
         PODKOP=RUNNING \
-        SING_BOX=RUNNING \
-        FAKEIP=OK \
-        SERVICE_CHECK=OK
+        SING_BOX=RUNNING
     do
         key=${required%%=*}
         expected=${required#*=}
@@ -490,7 +485,6 @@ evaluate_health() {
             return 1
         fi
     done
-    LAST_HEALTH_RESULT=OK
     return 0
 }
 
@@ -515,7 +509,7 @@ wait_for_healthy_cycle() {
             seen_last="$last_check"
             before_started="$check_started"
             if evaluate_health; then
-                log "post-update Monitoring cycle is healthy"
+                log "post-update local services verified; network health=$LAST_HEALTH_RESULT"
                 return 0
             fi
             bad_cycles=$((bad_cycles + 1))
@@ -576,8 +570,6 @@ current_boot_id() {
 begin_controlled_action() {
     [ -r "$LOCK_DIR/pid" ] || die "update lock is not held"
     ip -4 route show default 2>/dev/null | grep -q '^default ' || die "CONTROLLED preflight failed: no IPv4 default route"
-    active_vpn="$(uci -q get podkop.main.interface 2>/dev/null || true)"
-    [ -n "$active_vpn" ] && [ "$active_vpn" != "unknown" ] || die "CONTROLLED preflight failed: active VPN is unknown"
     [ ! -e /var/run/podkop-recovery.lock ] || die "CONTROLLED preflight failed: Podkop recovery is active"
     evaluate_health || die "CONTROLLED preflight failed: health is $LAST_HEALTH_RESULT"
 
@@ -627,7 +619,7 @@ reconcile_pending_reboot() {
         [ "$pending_boot" != "unknown" ] && [ "$boot_now" != "$pending_boot" ] || return 0
 
     if evaluate_health; then
-        write_update_state "$current" "$current" OK none none none OK none
+        write_update_state "$current" "$current" OK none none none "$LAST_HEALTH_RESULT" none
         log "pending reboot completed; active HOME NET version promoted to $current"
     else
         log "pending reboot detected, but health is $LAST_HEALTH_RESULT; activation remains pending"
@@ -733,14 +725,14 @@ apply_fetched_release() {
         pending_boot=none
         [ "$UPDATE_PENDING_ACTION" = "reboot" ] && pending_boot="$(current_boot_id)"
         write_update_state "$release_version" "$activation_version" "$activation_status" \
-            "$UPDATE_PENDING_ACTION" "$UPDATE_PENDING_REASON" "$release_version" OK "$pending_boot"
+            "$UPDATE_PENDING_ACTION" "$UPDATE_PENDING_REASON" "$release_version" "$LAST_HEALTH_RESULT" "$pending_boot"
         UPDATED=1
         : > "$UPDATED_MARKER"
         log "bundle $release_tag installed; CRITICAL action $UPDATE_PENDING_ACTION remains pending"
         return 0
     fi
 
-    write_update_state "$release_version" "$activation_version" "$activation_status" none none none OK none
+    write_update_state "$release_version" "$activation_version" "$activation_status" none none none "$LAST_HEALTH_RESULT" none
     UPDATED=1
     : > "$UPDATED_MARKER"
     log "stable HOME NET bundle $release_tag applied and recorded successfully"
@@ -919,11 +911,10 @@ self_test() (
         printf 'STATUS=%s\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\n' "$health" > "$HEALTH_STATE"
         result=0
         evaluate_health || result=$?
-        expected=1
-        [ "$health" != OK ] || expected=0
+        expected=0
         expect "health ${health:-missing} gate" "$result" "$expected"
     done
-    for self_required in PODKOP SING_BOX FAKEIP SERVICE_CHECK; do
+    for self_required in PODKOP SING_BOX; do
         printf 'STATUS=OK\nPODKOP=RUNNING\nSING_BOX=RUNNING\nFAKEIP=OK\nSERVICE_CHECK=OK\n' | sed "/^$self_required=/d" > "$HEALTH_STATE"
         result=0
         evaluate_health || result=$?

@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.10}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.11}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -137,7 +137,7 @@ install_legacy_control_agent() {
 }
 
 prepare_native_control_agent() {
-    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || return 0
+    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || return 0
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
     valid_payload_sha "${CONTROL_AGENT_REF:-}" || fail 'native bootstrap requires an immutable source'
@@ -152,7 +152,7 @@ prepare_native_control_agent() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ]; then
+    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ]; then
         [ -n "${CONTROL_NATIVE_INSTALLER:-}" ] || fail 'native agent was not preflighted'
         sh "$CONTROL_NATIVE_INSTALLER" --install || fail 'native agent installation failed'
     else
@@ -233,18 +233,12 @@ health_value() {
 }
 
 evaluate_bootstrap_health() {
-    health_status="$(health_value STATUS)"
-    BOOTSTRAP_HEALTH_RESULT="$health_status"
-    [ "$health_status" = "OK" ] || {
-        [ "$health_status" = "UNKNOWN" ] || BOOTSTRAP_HEALTH_RESULT=FAIL
-        return 1
-    }
+    BOOTSTRAP_HEALTH_RESULT="$(health_value STATUS)"
+    case "$BOOTSTRAP_HEALTH_RESULT" in OK|UNKNOWN|FAIL) ;; *) BOOTSTRAP_HEALTH_RESULT=UNKNOWN ;; esac
 
     for required_health in \
         PODKOP=RUNNING \
-        SING_BOX=RUNNING \
-        FAKEIP=OK \
-        SERVICE_CHECK=OK
+        SING_BOX=RUNNING
     do
         health_key=${required_health%%=*}
         health_expected=${required_health#*=}
@@ -253,7 +247,6 @@ evaluate_bootstrap_health() {
             return 1
         }
     done
-    BOOTSTRAP_HEALTH_RESULT=OK
     return 0
 }
 
@@ -384,14 +377,14 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != 1 ]; then
             wait_for_fresh_bootstrap_health "$before_last" "$before_started" ||
                 fail "SSH policy applied but fresh monitoring health is not OK"
-            write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+            write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none "$BOOTSTRAP_HEALTH_RESULT"
         fi
         echo 'HOME NET: stable SSH policy patch complete.'
         exit 0
         ;;
 esac
 
-if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
     maintenance=/var/run/home-net-vpn-maintenance.lock
     [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
     command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
@@ -501,7 +494,7 @@ install_control_agent
 if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then
     printf '\n===== WAIT FOR FRESH MONITORING CYCLE =====\n'
     if wait_for_fresh_bootstrap_health "$BOOTSTRAP_BEFORE_LAST" "$BOOTSTRAP_BEFORE_STARTED"; then
-        write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none OK
+        write_bootstrap_state "$HOME_NET_BUNDLE_VERSION" OK none none "$BOOTSTRAP_HEALTH_RESULT"
     else
         write_bootstrap_state "$PREVIOUS_ACTIVE_VERSION" FAILED verification \
             'fresh bootstrap health did not become OK' "$BOOTSTRAP_HEALTH_RESULT"

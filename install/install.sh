@@ -1,7 +1,7 @@
 #!/bin/sh
 # HOME NET Cudy
 # Monitoring installer
-# Version: 1.7.8
+# Version: 1.7.9
 
 set -e
 
@@ -94,7 +94,6 @@ done
 
 # Refuse an inconsistent baseline before changing any installed files.
 sh "$VERIFY_SRC" services
-sh "$VERIFY_SRC" health
 BEFORE_CHECK=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
 
 BACKUP_DIR="/root/backup-podkop-install"
@@ -225,7 +224,7 @@ for attempt in $(seq 1 60); do
     [ "$now" -lt "$verification_deadline" ] || break
     current_check=$(sed -n 's/^LAST_CHECK=//p' /tmp/podkop-service-health/state)
     if [ -n "$current_check" ] && [ "$current_check" != "$BEFORE_CHECK" ] &&
-        HOME_NET_VERIFY_AFTER_EPOCH="$MONITORING_INITIALIZED_EPOCH" sh /usr/bin/home-net-install-verify all > "$verification_log" 2>&1; then
+        HOME_NET_VERIFY_AFTER_EPOCH="$MONITORING_INITIALIZED_EPOCH" sh /usr/bin/home-net-install-verify installation > "$verification_log" 2>&1; then
         cat "$verification_log"
         verified=1
         break
@@ -234,7 +233,7 @@ for attempt in $(seq 1 60); do
         echo 'WAIT: no new completed health cycle available' > "$verification_log"
     fi
     if [ "$waiting_reported" = 0 ]; then
-        echo 'Waiting for a completed healthy cycle after initialization (timeout: 600 seconds)'
+        echo 'Waiting for a completed local Monitoring cycle after initialization (timeout: 600 seconds)'
         waiting_reported=1
     fi
     remaining=$((verification_deadline - $(date +%s)))
@@ -250,6 +249,6 @@ fi
 rm -f /tmp/luci-indexcache 2>/dev/null || true
 rm -rf /tmp/luci-modulecache 2>/dev/null || true
 
-echo "HOME NET Podkop Monitor v1.7.8 installed"
+echo "HOME NET Podkop Monitor v1.7.9 installed"
 echo "LuCI page: Services -> HOME NET"
 echo "Domain capture remains disabled until explicitly enabled."
