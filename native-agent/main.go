@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const version = "native-agent-dev1"
+var version = "0.1.0-rc1"
 
 func (a *app) dispatch(args []string) error {
 	if len(args) == 0 {

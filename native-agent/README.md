@@ -14,8 +14,10 @@ decryption invocation. It does not replace Failover, Monitoring or firmware.
 
 ## Candidate status
 
-Not released or installed on hardware. Linux tests and static ARM64 build are
-required before size assessment or deployment. Existing Python files remain in
+Release candidate 0.1.0-rc1, not installed on hardware. Linux race-enabled tests,
+installer fault tests, go vet and the static ARM64 build passed at source commit
+8450719c9b5433a04febef61a6d5dbe02612a9cb. The binary measured 6,881,404 bytes;
+each new candidate must pass CI again. Existing Python files remain in
 the repository as regression oracles, but are not deployed by the native package.
 Do not infer installation success from compilation or from synthetic crypto tests.
 
@@ -73,6 +75,6 @@ The installed agent can execute existing panel jobs; review assignment/plan and
 transaction state before enabling it on a real router. Installer startup itself
 does not change LAN/WAN or restart Podkop/sing-box/network.
 
-This candidate needs additional Linux fault-injection and installer tests before
-deployment. No change to the published v1.7.9 tag/assets or fleet rollout policy
+This candidate still requires hardware validation of enrollment, polling,
+resource use and rollback before a stable release. No change to the published v1.7.9 tag/assets or fleet rollout policy
 is part of this work.
