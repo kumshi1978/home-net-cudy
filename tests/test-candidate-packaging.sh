@@ -5,10 +5,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 bundle_version="$(tr -d '\r\n' < "$ROOT/VERSION")"
 monitoring_version="$(tr -d '\r\n' < "$ROOT/MONITORING_VERSION")"
-[ "$bundle_version" = "1.7.9" ]
+[ "$bundle_version" = "1.7.10" ]
 [ "$monitoring_version" = "1.7.8" ]
 
-grep -Fqx "HOME_NET_BUNDLE_VERSION='1.7.9'" "$ROOT/bundle.conf"
+grep -Fqx "HOME_NET_BUNDLE_VERSION='1.7.10'" "$ROOT/bundle.conf"
 grep -Fqx "MONITORING_VERSION='1.7.8'" "$ROOT/bundle.conf"
 
 bootstrap_ref="$(sed -n "s/^MONITORING_BOOTSTRAP_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")"
@@ -29,4 +29,4 @@ esac
 grep -Fq 'HOME_NET_SKIP_VERSION_RECORD' "$ROOT/install-all.sh"
 grep -Fq 'if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then' "$ROOT/install-all.sh"
 
-echo "PASS candidate_packaging_1_7_9"
+echo "PASS candidate_packaging_1_7_10"

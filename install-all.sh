@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.9}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.10}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -124,7 +124,7 @@ fetch() {
     fi
 }
 
-install_control_agent() {
+install_legacy_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
     control_ref='ba3a1aa1ed67f9cc29ccf7724b19a0e6a17232bd'
@@ -134,6 +134,30 @@ install_control_agent() {
     echo "$control_hash  $control_installer" | sha256sum -c - || fail "control installer integrity check failed"
     sh -n "$control_installer" || fail "control installer syntax check failed"
     HOME_NET_CONTROL_REF="$control_ref" sh "$control_installer" || fail "control agent installation failed"
+}
+
+prepare_native_control_agent() {
+    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || return 0
+    [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
+    [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
+    valid_payload_sha "${CONTROL_AGENT_REF:-}" || fail 'native bootstrap requires an immutable source'
+    printf '%s\n' "${CONTROL_AGENT_INSTALL_SHA256:-}" | grep -Eq '^[0-9a-f]{64}$' || fail 'native bootstrap hash required'
+    CONTROL_NATIVE_INSTALLER="$TMP_DIR/control-native-install.sh"
+    fetch "https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$CONTROL_AGENT_REF/control-agent/install-native.sh" "$CONTROL_NATIVE_INSTALLER"
+    echo "$CONTROL_AGENT_INSTALL_SHA256  $CONTROL_NATIVE_INSTALLER" | sha256sum -c - || fail 'native bootstrap integrity failed'
+    sh -n "$CONTROL_NATIVE_INSTALLER" || fail 'invalid native bootstrap'
+    sh "$CONTROL_NATIVE_INSTALLER" --preflight || fail 'native agent preflight failed before runtime changes'
+}
+
+install_control_agent() {
+    [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
+    [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
+    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ]; then
+        [ -n "${CONTROL_NATIVE_INSTALLER:-}" ] || fail 'native agent was not preflighted'
+        sh "$CONTROL_NATIVE_INSTALLER" --install || fail 'native agent installation failed'
+    else
+        install_legacy_control_agent
+    fi
 }
 
 reject_disruptive_actions() {
@@ -367,7 +391,7 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         ;;
 esac
 
-if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
     maintenance=/var/run/home-net-vpn-maintenance.lock
     [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
     command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
@@ -377,6 +401,7 @@ if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 
     [ ! -f /etc/home-net/vpn/transaction/phase ] || phase=$(cat /etc/home-net/vpn/transaction/phase)
     case "$phase" in idle|verified) ;; *) fail 'unfinished VPN transaction requires review before update';; esac
 fi
+prepare_native_control_agent
 FAILOVER_INSTALL_REF="${FAILOVER_INSTALL_REF:-v$FAILOVER_VERSION}"
 FAILOVER_URL="https://raw.githubusercontent.com/$FAILOVER_REPO/$FAILOVER_INSTALL_REF/install.sh"
 MONITORING_URL="https://raw.githubusercontent.com/$MONITORING_REPO/$MONITORING_BOOTSTRAP_REF/install.sh"
