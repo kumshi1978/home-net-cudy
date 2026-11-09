@@ -70,6 +70,10 @@ func parseAWG(conf []byte) (map[string]string, error) {
 	if e != nil || !ip4(h) || ne != nil || !valid(`[0-9]+`, p) || n < 1 || n > 65535 {
 		return nil, errStopped
 	}
+	if value,ok := values["ListenPort"]; ok {
+		port,err := strconv.Atoi(value)
+		if err != nil || port < 1 || port > 65535 { return nil,errStopped }
+	}
 	for _, s := range strings.Split(values["AllowedIPs"], ",") {
 		s = strings.TrimSpace(s)
 		if _, e := netip.ParsePrefix(s); e != nil {
@@ -105,8 +109,14 @@ func persistenceCommands(slot string, values map[string]string, shown string) ([
 	for _, line := range lines {
 		p := strings.SplitN(line, "=", 2)
 		if len(p) == 2 {
+			if strings.HasSuffix(p[0],".listen_port") && p[0]!="network."+slot+".listen_port" && values["ListenPort"]!="" {
+				configured,err:=unquoteUCI(p[1])
+				if err!=nil { return nil,err }
+				left,le:=strconv.Atoi(configured);right,re:=strconv.Atoi(values["ListenPort"])
+				if le==nil && re==nil && left>0 && left==right { return nil,errStopped }
+			}
 			options[p[0]] = true
-			if p[1] == "amneziawg_"+slot {
+			if p[1] == "amneziawg_"+slot || p[1] == "wireguard_"+slot {
 				if !valid(`network\.[A-Za-z0-9_@\[\]]+`, p[0]) {
 					return nil, errStopped
 				}
@@ -116,6 +126,10 @@ func persistenceCommands(slot string, values map[string]string, shown string) ([
 	}
 	for i := len(peers) - 1; i >= 0; i-- {
 		commands = append(commands, "delete "+peers[i])
+	}
+	commands = append(commands,"set network."+slot+".defaultroute='0'","set network."+slot+".peerdns='0'")
+	for _,option := range []string{"dns","dns_search","disabled"} {
+		if options["network."+slot+"."+option] { commands = append(commands,"delete network."+slot+"."+option) }
 	}
 	for _, name := range sortedStringKeys(interfaceFields) {
 		option := interfaceFields[name]
@@ -164,6 +178,15 @@ func (a *app) persist(slot, expected string) error {
 	values, e := parseAWG(conf)
 	if e != nil {
 		return e
+	}
+	// Kernel-assigned local ports must remain unique when persisted across reboot.
+	if port := values["ListenPort"]; port != "" {
+		all,err := a.text("awg","show","all","listen-ports")
+		fields := strings.Fields(all)
+		if err != nil || len(fields)%2 != 0 { return errStopped }
+		for i:=0;i<len(fields);i+=2 {
+			if fields[i] != slot && fields[i+1] == port { return errStopped }
+		}
 	}
 	shown, e := a.text("uci", "-q", "show", "network")
 	if e != nil {

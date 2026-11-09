@@ -14,7 +14,7 @@ while [ "$#" -gt 0 ]; do
 done
 echo "$url" >>"$URLS"
 case "$url" in
- */home-net-native-agent-1.7.10-linux-arm64.tar.gz) cp "$MOCK_ARCHIVE" "$out" ;;
+ */home-net-native-agent-1.7.12-linux-arm64.tar.gz) cp "$MOCK_ARCHIVE" "$out" ;;
  */bundle.conf) cp "$MOCK_BUNDLE" "$out" ;;
  */control-agent/install-native.sh) cp "$MOCK_BOOTSTRAP" "$out" ;;
  *) echo unexpected-component >>"$EVENTS"; exit 91 ;;
@@ -26,7 +26,8 @@ cat >"$TMP/source/native-agent-arm64/install.sh" <<'EOF'
 #!/bin/sh
 echo "$1" >>"$EVENTS"
 EOF
-printf 'version=1.7.10\nsource_commit=0c8fd86cbd9897c665cc497ba1e59c6d4e0cf581\narchitecture=linux-arm64\n' >"$TMP/source/native-agent-arm64/BUILD-INFO"
+source_commit=$(sed -n "s/^source_commit='\([^']*\)'$/\1/p" "$ROOT/control-agent/install-native.sh")
+printf 'version=1.7.12\nsource_commit=%s\narchitecture=linux-arm64\n' "$source_commit" >"$TMP/source/native-agent-arm64/BUILD-INFO"
 tar -czf "$MOCK_ARCHIVE" -C "$TMP/source" native-agent-arm64
 digest=$(sha256sum "$MOCK_ARCHIVE" | cut -d ' ' -f1)
 sed "s/package_sha='[0-9a-f]*'/package_sha='$digest'/" "$ROOT/control-agent/install-native.sh" >"$TMP/bootstrap"
@@ -47,7 +48,7 @@ grep -q 'archive integrity' "$TMP/error"
 test ! -s "$EVENTS"
 cp "$TMP/good.tar.gz" "$MOCK_ARCHIVE"
 echo 'PASS tampered archive never reaches the installer'
-sed -i 's/0c8fd86cbd9897c665cc497ba1e59c6d4e0cf581/1111111111111111111111111111111111111111/' "$TMP/source/native-agent-arm64/BUILD-INFO"
+sed -i "s/$source_commit/1111111111111111111111111111111111111111/" "$TMP/source/native-agent-arm64/BUILD-INFO"
 tar -czf "$MOCK_ARCHIVE" -C "$TMP/source" native-agent-arm64
 digest=$(sha256sum "$MOCK_ARCHIVE" | cut -d ' ' -f1)
 sed "s/package_sha='[0-9a-f]*'/package_sha='$digest'/" "$ROOT/control-agent/install-native.sh" >"$TMP/bootstrap"

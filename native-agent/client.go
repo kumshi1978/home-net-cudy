@@ -188,6 +188,7 @@ func verifyPlan(config, response object, now int64) (object, error) {
 	}
 	rev, ok := integer(p["revision"])
 	previous, _ := integer(config["prepared_revision"])
+	if received,valid := integer(config["received_revision"]); valid && received > previous { previous=received }
 	expires, good := integer(p["expires"])
 	ss, validSlots := stringsOf(p["slots"])
 	if !ok || rev < previous || !good || expires <= now || expires > now+1860 || !validSlots || !(sameOrdered(ss, slots[:2]) || sameOrdered(ss, slots)) {
@@ -217,6 +218,18 @@ func verifyPlan(config, response object, now int64) (object, error) {
 		}
 		if _, e := validateRebind(r); e != nil {
 			return nil, e
+		}
+	}
+	if raw,ok := p["remove_backup2"]; ok {
+		order,validOrder:=stringsOf(p["order"])
+		if raw!=true || !validOrder || !sameOrdered(order,slots[:2]) || p["rebind"]!=nil || p["expected"]==nil { return nil,errStopped }
+	}
+	if raw,present:=p["expected"];present {
+		expected:=obj(raw);order,ok:=stringsOf(p["order"])
+		if !ok || !sameSet(keys(expected),order) { return nil,errStopped }
+		for _,slot:=range order {
+			v:=obj(expected[slot]);port,good:=integer(v["port"])
+			if !exactKeys(v,"host","port","address","fingerprint") || !ip4(str(v["host"])) || !address32(str(v["address"])) || !good || port<1 || port>65535 || !valid(`[a-f0-9]{64}`,str(v["fingerprint"])) {return nil,errStopped}
 		}
 	}
 	return p, nil
@@ -307,6 +320,8 @@ func (a *app) execute(job object, payload []byte, receipt string) string {
 func (a *app) topology() object {
 	out := object{"active": nil, "slots": object{}, "transaction": nil, "delivery_ready": false, "binding_ready": true, "controller_slots": []string{"awg_main", "awg_backup"}, "failover_slots": []string{}, "order_size": 0, "prepared_revision": 0}
 	ss := obj(out["slots"])
+	out["observed"] = a.observedInterfaces()
+	out["prune_ready"] = true
 	for _, s := range slots {
 		v, e := a.observe(s)
 		if e != nil {
@@ -345,6 +360,9 @@ func (a *app) topology() object {
 		out["preparation"] = p
 	}
 	if c, e := load(a.p(configPath)); e == nil {
+		for _, key := range []string{"received_revision", "apply_failed_revision"} {
+			if n,ok := integer(c[key]); ok && n >= 0 { out[key] = n }
+		}
 		if _, ok := integer(c["binding_failed_revision"]); ok {
 			out["binding_failed_revision"] = c["binding_failed_revision"]
 		}
@@ -374,7 +392,19 @@ func (a *app) topology() object {
 		}
 		out["controller_slots"] = filtered
 	}
+	if ack,e := load(a.p(vpnRoot+"/plan-applied.json")); e == nil && equalValues(ack["order"],out["order"]) && equalValues(ack["slots"],profileSnapshot(ss)) {
+		if n,ok := integer(ack["revision"]); ok && n > 0 { out["applied_revision"] = n }
+	}
 	return out
+}
+func profileSnapshot(ss object) object {
+	result := object{}
+	for name,value := range ss {
+		v := obj(value); item := object{}
+		for _,key := range []string{"host","port","address","fingerprint"} { item[key] = v[key] }
+		result[name] = item
+	}
+	return result
 }
 func prefix512(b []byte) []byte {
 	if len(b) > 512 {
@@ -439,6 +469,10 @@ func (a *app) poll() error {
 	if e != nil {
 		return e
 	}
+	if plan != nil {
+		config["received_revision"] = plan["revision"]
+		if e = save(a.p(configPath),config); e != nil { return e }
+	}
 	prepareRole := ""
 	if response["prepare_slots"] == true {
 		prepareRole = role
@@ -476,8 +510,34 @@ func (a *app) poll() error {
 	}
 	if plan != nil && plan["order"] != nil {
 		order, _ := stringsOf(plan["order"])
+		for name,expected:=range obj(plan["expected"]) {
+			actual,err:=a.observe(name)
+			if err!=nil || !equalValues(actual,expected) { return errStopped }
+		}
 		if !a.helper("set-order", strings.Join(order, ",")) {
+			config["apply_failed_revision"] = plan["revision"]
+			if e = save(a.p(configPath),config); e != nil { return e }
 			return errStopped
+		}
+		observed := a.topology()
+		if plan["remove_backup2"]==true {
+			if e=a.pruneBackup2(); e!=nil {
+				if e==errBusy { return nil }
+				config["apply_failed_revision"]=plan["revision"]
+				if saveErr:=save(a.p(configPath),config);saveErr!=nil{return saveErr};return e
+			}
+			observed=a.topology()
+		}
+		complete:=plan["expected"]!=nil
+		for _,slot:=range order { if obj(observed["slots"])[slot]==nil { complete=false } }
+		for name,expected:=range obj(plan["expected"]) {
+			if !equalValues(profileSnapshot(obj(observed["slots"]))[name],expected) { complete=false }
+		}
+		if complete && equalValues(observed["order"],plan["order"]) {
+			ack := object{"revision":plan["revision"],"order":observed["order"],"slots":profileSnapshot(obj(observed["slots"]))}
+			if e = save(a.p(vpnRoot+"/plan-applied.json"),ack); e != nil { return e }
+			delete(config,"apply_failed_revision")
+			if e = save(a.p(configPath),config); e != nil { return e }
 		}
 	}
 	if response["job"] == nil {
@@ -495,7 +555,19 @@ func (a *app) poll() error {
 	if plan != nil && job["commit"] == true && job["revision"] != plan["revision"] {
 		result = "expired"
 	} else {
-		result = a.execute(job, payload, receipt)
+		expires,_:=integer(job["expires"])
+		if expires>a.now().Unix() && !exists(receipt) && job["kind"]!="accept_verified" {
+			if e=a.prepareReplacement(job);e!=nil {
+				if e==errBusy{return nil}
+				result="failed"
+				if exists(a.p(vpnRoot+"/replacement-"+str(job["id"]))){result="recovery_required"}
+			}
+		}
+		if result=="" { result = a.execute(job, payload, receipt) }
+	}
+	if plan!=nil && job["commit"]==true && (result=="failed" || result=="recovery_required") {
+		config["apply_failed_revision"]=plan["revision"]
+		if e=save(a.p(configPath),config);e!=nil{return e}
 	}
 	if e = atomic(receipt, []byte(result)); e != nil {
 		return e
