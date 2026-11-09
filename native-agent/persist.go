@@ -181,7 +181,7 @@ func (a *app) persist(slot, expected string) error {
 	}
 	// Kernel-assigned local ports must remain unique when persisted across reboot.
 	if port := values["ListenPort"]; port != "" {
-		all,err := a.text("awg","show","all","listen-ports")
+		all,err := a.text("awg","show","all","listen-port")
 		fields := strings.Fields(all)
 		if err != nil || len(fields)%2 != 0 { return errStopped }
 		for i:=0;i<len(fields);i+=2 {

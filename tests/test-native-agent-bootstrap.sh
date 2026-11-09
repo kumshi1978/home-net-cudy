@@ -14,7 +14,7 @@ while [ "$#" -gt 0 ]; do
 done
 echo "$url" >>"$URLS"
 case "$url" in
- */home-net-native-agent-1.7.12-linux-arm64.tar.gz) cp "$MOCK_ARCHIVE" "$out" ;;
+ */home-net-native-agent-1.7.13-linux-arm64.tar.gz) cp "$MOCK_ARCHIVE" "$out" ;;
  */bundle.conf) cp "$MOCK_BUNDLE" "$out" ;;
  */control-agent/install-native.sh) cp "$MOCK_BOOTSTRAP" "$out" ;;
  *) echo unexpected-component >>"$EVENTS"; exit 91 ;;
@@ -27,7 +27,7 @@ cat >"$TMP/source/native-agent-arm64/install.sh" <<'EOF'
 echo "$1" >>"$EVENTS"
 EOF
 source_commit=$(sed -n "s/^source_commit='\([^']*\)'$/\1/p" "$ROOT/control-agent/install-native.sh")
-printf 'version=1.7.12\nsource_commit=%s\narchitecture=linux-arm64\n' "$source_commit" >"$TMP/source/native-agent-arm64/BUILD-INFO"
+printf 'version=1.7.13\nsource_commit=%s\narchitecture=linux-arm64\n' "$source_commit" >"$TMP/source/native-agent-arm64/BUILD-INFO"
 tar -czf "$MOCK_ARCHIVE" -C "$TMP/source" native-agent-arm64
 digest=$(sha256sum "$MOCK_ARCHIVE" | cut -d ' ' -f1)
 sed "s/package_sha='[0-9a-f]*'/package_sha='$digest'/" "$ROOT/control-agent/install-native.sh" >"$TMP/bootstrap"
