@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [feature/luci-home-net-dashboard, main]
+    branches: [feature/luci-home-net-dashboard, main, release/v1.7.10]
 
 permissions:
   contents: read
@@ -28,6 +28,7 @@ jobs:
           - install-all-safety
           - ssh-policy-patch
           - control-agent-bootstrap
+          - native-agent-bootstrap
           - control-agent-slots
           - home-net-luci
           - home-net-install-verify
