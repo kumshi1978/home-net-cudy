@@ -13,8 +13,8 @@ grep -Fqx "MONITORING_VERSION='1.7.9'" "$ROOT/bundle.conf"
 
 bootstrap_ref="$(sed -n "s/^MONITORING_BOOTSTRAP_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")"
 printf '%s\n' "$bootstrap_ref" | grep -Eq '^[0-9a-f]{40}$'
-# Preparing a draft must not change the stable Monitoring entry point or policy.
-grep -Fq "HOME_NET_RELEASE_REF:-v1.7.11" "$ROOT/install.sh"
+# The released entry point and policy advance together; rollout stays manual.
+grep -Fq "HOME_NET_RELEASE_REF:-v1.7.12" "$ROOT/install.sh"
 grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.12" "$ROOT/install-all.sh"
 grep -Fq 'downloading v1.7.9' "$ROOT/install.sh"
 
@@ -25,11 +25,11 @@ policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.co
 policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 case "$policy_tag:$policy_rollout" in
     v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.9:manual|v1.7.9:canary|v1.7.9:fleet) ;;
-    v1.7.11:manual) ;;
+    v1.7.11:manual|v1.7.12:manual) ;;
     *) echo "unexpected release rollout policy" >&2; exit 1 ;;
 esac
 
 grep -Fq 'HOME_NET_SKIP_VERSION_RECORD' "$ROOT/install-all.sh"
 grep -Fq 'if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then' "$ROOT/install-all.sh"
 
-echo "PASS candidate_packaging_1_7_12_draft"
+echo "PASS candidate_packaging_1_7_12_manual"

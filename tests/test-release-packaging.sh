@@ -118,7 +118,7 @@ for key in MONITORING_BOOTSTRAP_REF HOME_NET_UPDATER_REF; do
     echo "PASS moving_$key rejected"
 done
 
-grep -Fq "HOME_NET_RELEASE_REF:-v1.7.11" "$ROOT/install.sh"
+grep -Fq "HOME_NET_RELEASE_REF:-v1.7.12" "$ROOT/install.sh"
 grep -Fq "LUCI_VIEW_SRC=\"\$BASE_DIR/../luci/view/home-net/status.js\"" "$ROOT/install/install.sh"
 grep -Fq '/main/rollout-policy.conf' "$ROOT/scripts/home-net-update"
 echo 'PASS Monitoring/LuCI use pinned archive; only rollout policy remains mutable'
