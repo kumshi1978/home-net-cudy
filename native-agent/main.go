@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var version = "0.1.0-rc1"
+var version = "1.7.10"
 
 func (a *app) dispatch(args []string) error {
 	if len(args) == 0 {

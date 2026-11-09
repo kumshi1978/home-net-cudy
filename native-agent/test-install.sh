@@ -5,6 +5,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/bin" "$TMP/root/etc/config" "$TMP/root/etc/init.d" "$TMP/root/usr/sbin" "$TMP/root/usr/bin" "$TMP/root/var/run" "$TMP/root/overlay" "$TMP/payload"
 export FIXTURE="$TMP/root" FREE_KIB=100000
+export REAL_FLOCK=$(command -v flock)
 cat >"$TMP/bin/id" <<'EOF'
 #!/bin/sh
 echo 0
@@ -15,6 +16,7 @@ echo aarch64
 EOF
 cat >"$TMP/bin/flock" <<'EOF'
 #!/bin/sh
+if [ "${MOCK_REAL_FLOCK:-0}" = 1 ]; then exec "$REAL_FLOCK" "$@"; fi
 exit 0
 EOF
 cat >"$TMP/bin/df" <<'EOF'
@@ -61,6 +63,21 @@ run --preflight
 test ! -e "$FIXTURE/etc/home-net/keys/age-identity.txt"
 test ! -e "$FIXTURE/usr/sbin/vpn-control-cudy"
 echo 'PASS preflight is not an installation'
+(
+    export MOCK_REAL_FLOCK=1
+    exec 9>>"$FIXTURE/var/run/home-net-vpn-maintenance.lock"
+    "$REAL_FLOCK" -n 9
+    run --preflight
+)
+echo 'PASS installer reuses the inherited bundle maintenance lock'
+(
+    export MOCK_REAL_FLOCK=1
+    exec 8>>"$FIXTURE/var/run/home-net-vpn-maintenance.lock"
+    "$REAL_FLOCK" -n 8
+    if run --preflight; then echo 'independent lock ignored' >&2; exit 1; fi
+    grep -q 'VPN maintenance busy' "$TMP/output"
+)
+echo 'PASS independent maintenance lock prevents installation'
 if FREE_KIB=0 run --install; then echo 'space gate failed' >&2; exit 1; fi
 grep -q 'not enough space' "$TMP/output"
 test ! -e "$FIXTURE/usr/sbin/vpn-control-cudy"

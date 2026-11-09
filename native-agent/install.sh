@@ -23,7 +23,9 @@ phase=idle
 case "$phase" in idle|verified) ;; *) fail 'unfinished transaction requires review' ;; esac
 command -v flock >/dev/null 2>&1 || fail 'flock is required'
 [ ! -L /var/run/home-net-vpn-maintenance.lock ] || fail 'unsafe maintenance path'
-exec 9>>/var/run/home-net-vpn-maintenance.lock
+if ! [ /proc/self/fd/9 -ef /var/run/home-net-vpn-maintenance.lock ]; then
+    exec 9>>/var/run/home-net-vpn-maintenance.lock
+fi
 flock -n 9 || fail 'VPN maintenance busy'
 lock=/var/run/home-net-native-install.lock
 mkdir "$lock" || fail 'installation already running'
