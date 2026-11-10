@@ -20,6 +20,30 @@ case "$url" in
  *) echo unexpected-component >>"$EVENTS"; exit 91 ;;
 esac
 EOF
+cat >"$TMP/bin/curl" <<'EOF'
+#!/bin/sh
+out=
+url=
+while [ "$#" -gt 0 ]; do
+ case "$1" in
+  -o) out=$2; shift 2 ;;
+  --connect-timeout|--max-time) shift 2 ;;
+  -*) shift ;;
+  *) url=$1; shift ;;
+ esac
+done
+echo "curl:$url" >>"$URLS"
+if [ "${MOCK_CURL_FAIL:-0}" = 1 ]; then
+ printf 'incomplete' > "$out"
+ exit 28
+fi
+case "$url" in
+ */home-net-native-agent-1.7.14-linux-arm64.tar.gz) cp "$MOCK_ARCHIVE" "$out" ;;
+ */bundle.conf) cp "$MOCK_BUNDLE" "$out" ;;
+ */control-agent/install-native.sh) cp "$MOCK_BOOTSTRAP" "$out" ;;
+ *) echo unexpected-component >>"$EVENTS"; exit 91 ;;
+esac
+EOF
 chmod +x "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH"
 cat >"$TMP/source/native-agent-arm64/install.sh" <<'EOF'
@@ -36,6 +60,11 @@ sh "$TMP/bootstrap" --install
 printf '%s\n' --preflight --install >"$TMP/expected"
 cmp "$TMP/expected" "$EVENTS"
 echo 'PASS native archive preflight and installation modes'
+: >"$URLS"
+MOCK_CURL_FAIL=1 sh "$TMP/bootstrap" --preflight
+grep -q '^curl:' "$URLS"
+test "$(wc -l <"$URLS")" = 2
+echo 'PASS curl failure cleans partial archive and falls back to wget'
 : >"$URLS"
 HOME_NET_NATIVE_ARCHIVE="$MOCK_ARCHIVE" sh "$TMP/bootstrap" --preflight
 test ! -s "$URLS"
