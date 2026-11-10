@@ -17,6 +17,11 @@ printf '%s\n' "$bootstrap_ref" | grep -Eq '^[0-9a-f]{40}$'
 grep -Fq "HOME_NET_RELEASE_REF:-v1.7.14" "$ROOT/install.sh"
 grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.14" "$ROOT/install-all.sh"
 grep -Fq 'downloading v1.7.9' "$ROOT/install.sh"
+# A new bundle must never silently bootstrap the preceding native agent.
+# The immutable v1.7.14 archive pin is deliberately a release gate.
+grep -Fq 'releases/download/v1.7.14/home-net-native-agent-1.7.14-linux-arm64.tar.gz' "$ROOT/control-agent/install-native.sh"
+grep -Fq "grep -Fxq 'version=1.7.14'" "$ROOT/control-agent/install-native.sh"
+
 
 # Policy remains mutable after release: packaging must permit the documented
 # manual -> canary -> fleet stages without changing the immutable bundle.
