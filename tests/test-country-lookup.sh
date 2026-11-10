@@ -19,7 +19,7 @@ EOF_UBUS
 cat > "$BIN/jsonfilter" <<'EOF_JSONFILTER'
 #!/bin/sh
 [ "$1 $2" = "-e @.l3_device" ] || exit 1
-sed -n 's/.*"l3_device":"\\([^"]*\\)".*/\\1/p'
+sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p'
 EOF_JSONFILTER
 cat > "$BIN/ip" <<'EOF_IP'
 #!/bin/sh
