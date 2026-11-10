@@ -495,6 +495,21 @@ func (a *app) poll() error {
 			}
 		}
 		if rebind := obj(plan["rebind"]); rebind != nil {
+			// A signed plan is polled every 60 seconds. A successful rebind
+			// must not run again: it restarts Podkop and failover, briefly
+			// disrupting the active VPN even when no configuration changed.
+			digestBytes, digestErr := canonical(rebind)
+			if digestErr != nil {
+				return digestErr
+			}
+			digest := hash(digestBytes)
+			if config["binding_applied_revision"] == plan["revision"] {
+				// A revision must not silently acquire a different binding.
+				if config["binding_applied_digest"] != digest {
+					return errStopped
+				}
+				return nil
+			}
 			if config["binding_failed_revision"] == plan["revision"] {
 				return nil
 			}
@@ -505,7 +520,12 @@ func (a *app) poll() error {
 				config["binding_failed_revision"] = plan["revision"]
 				return save(a.p(configPath), config)
 			}
-			return nil
+			// Persist the successful revision before returning to the poll
+			// loop. If the same plan is delivered again, no service restarts.
+			config["binding_applied_revision"] = plan["revision"]
+			config["binding_applied_digest"] = digest
+			delete(config, "binding_failed_revision")
+			return save(a.p(configPath), config)
 		}
 	}
 	if plan != nil && plan["order"] != nil {
