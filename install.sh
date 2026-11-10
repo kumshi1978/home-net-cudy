@@ -5,7 +5,7 @@
 set -eu
 
 REPO="kumshi1978/home-net-cudy"
-RELEASE_REF="${HOME_NET_RELEASE_REF:-v1.7.14}"
+RELEASE_REF="${HOME_NET_RELEASE_REF:-v1.7.15}"
 TMP_DIR="/tmp/home-net-cudy-install.$$"
 ARCHIVE="$TMP_DIR/release.tar.gz"
 SRC_DIR="$TMP_DIR/src"

@@ -117,4 +117,16 @@ sha256sum -c "$backup/protected.sha256" >/dev/null || fail 'protected configurat
 /etc/init.d/vpn-control-cudy running >/dev/null 2>&1 || fail 'agent did not start'
 for target in $targets; do sha256sum "$target"; done >/etc/home-net/native-agent-files.sha256
 dirty=0
+# Retain the successful upgrade's immediate rollback snapshot. Only after the
+# new service is running, discard older *completed* native installer snapshots.
+# Never remove incomplete/unknown directories or the current rollback.
+for old in /etc/home-net/native-agent-backups/install.*; do
+    [ -d "$old" ] && [ ! -L "$old" ] && [ "$old" != "$backup" ] || continue
+    [ -d "$old/files" ] && [ ! -L "$old/files" ] || continue
+    [ -f "$old/targets" ] && [ ! -L "$old/targets" ] || continue
+    [ -f "$old/protected.sha256" ] && [ ! -L "$old/protected.sha256" ] || continue
+    [ -f "$old/staged" ] && [ ! -L "$old/staged" ] || continue
+    grep -Fxq '/usr/sbin/vpn-control-cudy' "$old/targets" || continue
+    rm -rf -- "$old" || echo "WARNING: old native backup not pruned: $old" >&2
+done
 echo "HOME NET native agent installed; backup: $backup; network and routes unchanged"

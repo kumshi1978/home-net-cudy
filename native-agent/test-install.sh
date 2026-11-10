@@ -120,3 +120,7 @@ after_inode=$(ls -i "$backup/files/${FIXTURE#/}/usr/sbin/vpn-control-cudy" | awk
 test "$before_inode" = "$after_inode"
 cmp "$TMP/old-native" "$backup/files/${FIXTURE#/}/usr/sbin/vpn-control-cudy"
 echo 'PASS native upgrade keeps a hard-linked rollback copy within the current-install budget'
+kept=$(find "$FIXTURE/etc/home-net/native-agent-backups" -mindepth 1 -maxdepth 1 -type d -name 'install.*' | wc -l)
+test "$kept" -eq 1
+test -f "$backup/files/${FIXTURE#/}/usr/sbin/vpn-control-cudy"
+echo 'PASS successful upgrade prunes older native snapshots but retains rollback'
