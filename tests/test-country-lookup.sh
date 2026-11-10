@@ -11,6 +11,21 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 BIN="$TMP/bin"
 mkdir -p "$BIN"
 
+cat > "$BIN/ubus" <<'EOF_UBUS'
+#!/bin/sh
+[ "$1 $2 $3" = "call network.interface.wan status" ] || exit 1
+printf '{"l3_device":"%s"}\n' "${MOCK_WAN_DEVICE:-eth0}"
+EOF_UBUS
+cat > "$BIN/jsonfilter" <<'EOF_JSONFILTER'
+#!/bin/sh
+[ "$1 $2" = "-e @.l3_device" ] || exit 1
+sed -n 's/.*"l3_device":"\\([^"]*\\)".*/\\1/p'
+EOF_JSONFILTER
+cat > "$BIN/ip" <<'EOF_IP'
+#!/bin/sh
+[ "$1 $2 $3" = "link show dev" ] || exit 1
+[ "$4" = "eth0" ]
+EOF_IP
 cat > "$BIN/logger" <<'EOF_LOGGER'
 #!/bin/sh
 printf '%s\n' "$*" >> "$MOCK_LOGS"
@@ -51,12 +66,16 @@ case "$MOCK_SCENARIO:$url" in
     ip-primary:https://ifconfig.me/ip) printf '203.0.113.7' ;;
     ip-fallback:https://ifconfig.me/ip) http=429; exit 22 ;;
     ip-fallback:https://api.ipify.org) printf '203.0.113.8' ;;
+    wan-bound:https://ifconfig.me/ip)
+        if [ "$iface" = eth0 ]; then printf '78.139.224.104'; else printf '194.62.66.234'; fi ;;
+    wan-bound:https://ipinfo.io/country)
+        if [ "$iface" = eth0 ]; then printf 'RU\n'; else printf 'DE\n'; fi ;;
     ip-invalid:https://ifconfig.me/ip) printf '<html>blocked</html>' ;;
     ip-invalid:https://api.ipify.org) printf '999.1.1.1' ;;
     *) http=429; exit 22 ;;
 esac
 EOF_CURL
-chmod +x "$BIN/logger" "$BIN/curl"
+chmod +x "$BIN/"*
 
 run_lookup() {
     scenario="$1"
@@ -166,6 +185,36 @@ run_lookup timeout --ip
 grep -Fq 'http=000 curl=28' "$TMP/logs"
 echo 'PASS malformed_ip_and_timeout_remain_unknown'
 
+# Reproduce the 1.7.15 false-positive: plain HTTPS leaves via AWG, but
+# --interface eth0 reaches Dom.ru. Both OpenWrt versions must use the
+# physical device reported by netifd, regardless of their package manager.
+for release in 24.10.4 25.12.5; do
+    run_lookup wan-bound --ip
+    assert_country 194.62.66.234
+    grep -Fq 'iface=direct' "$TMP/calls"
+    run_lookup wan-bound --ip --wan
+    assert_country 78.139.224.104
+    grep -Fq 'iface=eth0' "$TMP/calls"
+    run_lookup wan-bound --wan
+    assert_country RU
+    grep -Fq 'iface=eth0' "$TMP/calls"
+    echo "PASS wan_binding_openwrt_$release"
+done
+: > "$TMP/calls"
+MOCK_WAN_DEVICE=awg_main PATH="$BIN:$PATH" MOCK_SCENARIO=wan-bound \
+    MOCK_CALLS="$TMP/calls" MOCK_LOGS="$TMP/logs" \
+    PODKOP_COUNTRY_LOG_DIR="$TMP/log-state" sh "$LOOKUP" --ip --wan >"$TMP/output" 2>"$TMP/error" && exit 1
+[ ! -s "$TMP/calls" ] && [ ! -s "$TMP/output" ]
+MOCK_WAN_DEVICE='' PATH="$BIN:$PATH" MOCK_SCENARIO=wan-bound \
+    MOCK_CALLS="$TMP/calls" MOCK_LOGS="$TMP/logs" \
+    PODKOP_COUNTRY_LOG_DIR="$TMP/log-state" sh "$LOOKUP" --ip --wan >"$TMP/output" 2>"$TMP/error" && exit 1
+[ ! -s "$TMP/calls" ] && [ ! -s "$TMP/output" ]
+echo 'PASS missing_or_vpn_wan_never_falls_back_to_unbound_curl'
+
+grep -Fq '"$COUNTRY_LOOKUP" --ip --wan' "$DAEMON"
+grep -Fq '"$COUNTRY_LOOKUP" --wan' "$DAEMON"
+echo 'PASS health_daemon_uses_wan_bound_probe'
+
 
 if grep -Eq '(^|[[:space:]/])(jq|python|python3)([[:space:]]|$)' "$LOOKUP"; then
     echo 'lookup must not depend on jq or python' >&2
@@ -201,6 +250,14 @@ sed '/^wait_for_startup_ready$/,$d' "$DAEMON" > "$TMP/daemon-lib"
  write_state
  grep -qx 'STATUS=FAIL' "$STATE_FILE"
  grep -Fq 'VPN BYPASS DETECTED' "$FIXTURE_DIR/health.log"
+ grep -qx 'REASON=VPN BYPASS DETECTED' "$STATE_FILE"
+ # With different physical WAN and VPN IPs, the health check must not
+ # misclassify the VPN as bypassing the tunnel.
+ get_wan_ip() { echo 78.139.224.104; }
+ write_state
+ grep -qx 'STATUS=OK' "$STATE_FILE"
+ grep -qx 'WAN_IP=78.139.224.104' "$STATE_FILE"
+ grep -qx 'SERVICE_CHECK=OK' "$STATE_FILE"
 )
 echo 'PASS unknown_probe_and_real_bypass_have_distinct_states'
 echo 'All country lookup tests passed.'
