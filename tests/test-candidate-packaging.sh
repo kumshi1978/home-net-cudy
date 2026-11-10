@@ -18,7 +18,7 @@ grep -Fq "HOME_NET_RELEASE_REF:-v1.7.16" "$ROOT/install.sh"
 grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.16" "$ROOT/install-all.sh"
 grep -Fq 'downloading v1.7.10' "$ROOT/install.sh"
 # A new bundle must never silently bootstrap the preceding native agent.
-# The immutable v1.7.16 archive pin is deliberately a release gate.
+# The native v1.7.15 archive pin is deliberately unchanged for this Monitoring-only bundle.
 grep -Fq 'releases/download/v1.7.15/home-net-native-agent-1.7.15-linux-arm64.tar.gz' "$ROOT/control-agent/install-native.sh"
 grep -Fq "grep -Fxq 'version=1.7.15'" "$ROOT/control-agent/install-native.sh"
 
@@ -29,7 +29,7 @@ grep -Fqx "POLICY_SCHEMA='1'" "$ROOT/rollout-policy.conf"
 policy_tag="$(sed -n "s/^RELEASE_TAG='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 policy_rollout="$(sed -n "s/^ROLLOUT='\([^']*\)'$/\1/p" "$ROOT/rollout-policy.conf")"
 case "$policy_tag:$policy_rollout" in
-    v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.10:manual|v1.7.10:canary|v1.7.10:fleet) ;;
+    v1.6.0:manual|v1.5.4:manual|v1.7.4:manual|v1.7.4:canary|v1.7.4:fleet|v1.7.5:manual|v1.7.5:canary|v1.7.5:fleet|v1.7.6:manual|v1.7.6:canary|v1.7.6:fleet|v1.7.9:manual|v1.7.9:canary|v1.7.9:fleet) ;;
     v1.7.11:manual|v1.7.13:manual|v1.7.14:manual|v1.7.15:manual|v1.7.16:manual) ;;
     *) echo "unexpected release rollout policy" >&2; exit 1 ;;
 esac
@@ -37,4 +37,4 @@ esac
 grep -Fq 'HOME_NET_SKIP_VERSION_RECORD' "$ROOT/install-all.sh"
 grep -Fq 'if [ "${HOME_NET_SKIP_VERSION_RECORD:-0}" != "1" ]; then' "$ROOT/install-all.sh"
 
-echo "PASS candidate_packaging_1_7_15_manual"
+echo "PASS candidate_packaging_1_7_16_manual"
