@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [feature/luci-home-net-dashboard, main, release/v1.7.10, fix/v1.7.11-local-install-checks]
+    branches: [feature/luci-home-net-dashboard, main, release/v1.7.10, release/v1.7.16-candidate, fix/v1.7.11-local-install-checks]
 
 permissions:
   contents: read
