@@ -7,9 +7,9 @@ case "${1:---install}" in --preflight|--install) mode=${1:---install} ;; *) fail
 [ "$#" -le 1 ] || fail 'invalid invocation'
 [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || exit 0
 [ "$(uname -m)" = aarch64 ] || fail 'native agent supports aarch64 only'
-source_commit='b71cd05559b39d14934d04aac25a9741a9ac0bef'
-package_sha='b39810d0257683c04e3486906b6f568fb265fc2e1f42e0f89024cff07370fbaa'
-url='https://github.com/kumshi1978/home-net-cudy/releases/download/v1.7.13/home-net-native-agent-1.7.13-linux-arm64.tar.gz'
+source_commit='429e545793fbb75f835d489d061e570c5b8d88d4'
+package_sha='b45089fdd93f879e083c13dcb5fc6e025e5550bd2d7345b5bd423ecc9400bc21'
+url='https://github.com/kumshi1978/home-net-cudy/releases/download/v1.7.14/home-net-native-agent-1.7.14-linux-arm64.tar.gz'
 work=$(mktemp -d /tmp/home-net-native-bootstrap.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 trap 'exit 1' HUP INT TERM
@@ -27,7 +27,7 @@ fi
 echo "$package_sha  $archive" | sha256sum -c - >/dev/null || fail 'archive integrity check failed'
 tar -xzf "$archive" -C "$work" || fail 'archive extraction failed'
 payload=$work/native-agent-arm64
-grep -Fxq 'version=1.7.13' "$payload/BUILD-INFO" || fail 'unexpected native version'
+grep -Fxq 'version=1.7.14' "$payload/BUILD-INFO" || fail 'unexpected native version'
 grep -Fxq "source_commit=$source_commit" "$payload/BUILD-INFO" || fail 'unexpected native source'
 grep -Fxq 'architecture=linux-arm64' "$payload/BUILD-INFO" || fail 'unexpected native architecture'
 sh "$payload/install.sh" "$mode"
