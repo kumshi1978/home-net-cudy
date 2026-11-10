@@ -1,0 +1,91 @@
+name: Publish HOME NET 1.7.15
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v1.7.15.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: home-net-release-v1.7.15
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'kumshi1978/home-net-cudy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate immutable release inputs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = '1.7.15'
+          test "$(cat native-agent/VERSION)" = '1.7.15'
+          grep -Fxq "HOME_NET_BUNDLE_VERSION='1.7.15'" bundle.conf
+          grep -Fxq "DEFAULT_AUTO_UPDATE_MODE='check'" bundle.conf
+          grep -Fxq "UPDATE_ACTION_CLASS='CONTROLLED'" bundle.conf
+          grep -Fxq "CONTROL_AGENT_REF='d68644275a09efced402a9e289f6ea5c89ff7d84'" bundle.conf
+          test "$(sed -n "s/^CONTROL_AGENT_INSTALL_SHA256='\([^']*\)'$/\1/p" bundle.conf)" = "$(sha256sum control-agent/install-native.sh | cut -d' ' -f1)"
+          grep -Fq "source_commit='f8031fa7ee2f6cb66d0a10677d8bf913a140adaf'" control-agent/install-native.sh
+          grep -Fq "package_sha='74eea3ebeac16a41f2a61ea8581b022b807f14d86756c1e38d61fb090c96e9f0'" control-agent/install-native.sh
+          grep -Fq 'releases/download/v1.7.15/home-net-native-agent-1.7.15-linux-arm64.tar.gz' control-agent/install-native.sh
+          if gh release view v1.7.15 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite assets' >&2
+            exit 1
+          fi
+      - name: Download tested ARM64 archive from immutable CI run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          run_sha=$(gh api repos/"$GITHUB_REPOSITORY"/actions/runs/42808786003 --jq '.head_sha')
+          test "$run_sha" = 'f8031fa7ee2f6cb66d0a10677d8bf913a140adaf'
+          mkdir -p staging assets
+          gh run download 42808786003 --repo "$GITHUB_REPOSITORY" --name native-agent-candidate --dir staging
+          source_file=$(find staging -type f -name 'home-net-native-agent-1.7.15-linux-arm64.tar.gz' -print -quit)
+          test -n "$source_file" && test -f "$source_file"
+          cp "$source_file" assets/
+          echo '74eea3ebeac16a41f2a61ea8581b022b807f14d86756c1e38d61fb090c96e9f0  assets/home-net-native-agent-1.7.15-linux-arm64.tar.gz' | sha256sum -c -
+          tar -xOzf assets/home-net-native-agent-1.7.15-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'source_commit=f8031fa7ee2f6cb66d0a10677d8bf913a140adaf'
+          tar -xOzf assets/home-net-native-agent-1.7.15-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'version=1.7.15'
+      - name: Prepare release assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp bundle.conf install-all.sh assets/
+          cp docs/releases/v1.7.15.md assets/RELEASE_NOTES.md
+          git archive --format=tar.gz --prefix=home-net-cudy-v1.7.15/ HEAD > assets/home-net-cudy-v1.7.15.tar.gz
+          cat > assets/release-lock.json <<EOF
+          {
+            "release": "v1.7.15",
+            "release_commit": "$GITHUB_SHA",
+            "native_source_commit": "f8031fa7ee2f6cb66d0a10677d8bf913a140adaf",
+            "native_archive_sha256": "74eea3ebeac16a41f2a61ea8581b022b807f14d86756c1e38d61fb090c96e9f0",
+            "native_bootstrap_source": "d68644275a09efced402a9e289f6ea5c89ff7d84",
+            "native_bootstrap_sha256": "ee071c08bedccab75ccc568c4b03c1ddf6238c68f73a42686e6601c4d841badc",
+            "rollout": "manual",
+            "hardware_validated": false
+          }
+          EOF
+          (cd assets && sha256sum bundle.conf install-all.sh RELEASE_NOTES.md release-lock.json home-net-cudy-v1.7.15.tar.gz home-net-native-agent-1.7.15-linux-arm64.tar.gz > SHA256SUMS)
+          (cd assets && sha256sum -c SHA256SUMS)
+      - name: Publish immutable versioned assets without fleet rollout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create v1.7.15 assets/bundle.conf assets/install-all.sh assets/RELEASE_NOTES.md assets/release-lock.json assets/SHA256SUMS assets/home-net-cudy-v1.7.15.tar.gz assets/home-net-native-agent-1.7.15-linux-arm64.tar.gz --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "HOME NET 1.7.15 — устойчивые загрузки GitHub" --notes-file assets/RELEASE_NOTES.md
+          gh release view v1.7.15 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets --jq '{tagName,isDraft,isPrerelease,assets:[.assets[].name]}'
