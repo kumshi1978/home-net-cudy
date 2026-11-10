@@ -48,7 +48,21 @@ cat > "$BIN/pgrep" <<'EOF_PGREP'
 #!/bin/sh
 exit 1
 EOF_PGREP
-chmod +x "$BIN/wget" "$BIN/uci" "$BIN/pgrep"
+cat > "$BIN/curl" <<'EOF_CURL'
+#!/bin/sh
+out='' url=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        --connect-timeout|--max-time) shift 2 ;;
+        -*) shift ;;
+        *) url="$1"; shift ;;
+    esac
+done
+[ -n "$out" ] && [ -n "$url" ] || exit 91
+exec "$(dirname "$0")/wget" -q -O "$out" "$url"
+EOF_CURL
+chmod +x "$BIN/wget" "$BIN/curl" "$BIN/uci" "$BIN/pgrep"
 
 cat > "$PAYLOADS/bundle.conf" <<'EOF_BUNDLE'
 HOME_NET_BUNDLE_VERSION='1.5.2'

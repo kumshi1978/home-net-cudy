@@ -30,10 +30,17 @@ mkdir -p "$SRC_DIR"
 
 echo "HOME NET Monitoring: downloading v1.7.9 ($RELEASE_REF)"
 
-if command -v wget >/dev/null 2>&1; then
-    wget -q -O "$ARCHIVE" "$URL" || fail "download failed: $URL"
-elif command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 10 --max-time 120 -o "$ARCHIVE" "$URL" || fail "download failed: $URL"
+if command -v curl >/dev/null 2>&1; then
+    if ! curl -4 -fL --connect-timeout 10 --max-time 120 -o "$ARCHIVE" "$URL"; then
+        rm -f "$ARCHIVE"
+        if command -v wget >/dev/null 2>&1; then
+            wget -q -T 30 -O "$ARCHIVE" "$URL" || fail "download failed with curl and wget: $URL"
+        else
+            fail "download failed with curl: $URL"
+        fi
+    fi
+elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "$ARCHIVE" "$URL" || fail "download failed with wget: $URL"
 else
     fail "wget or curl is required"
 fi

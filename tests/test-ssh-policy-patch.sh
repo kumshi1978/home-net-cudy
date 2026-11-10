@@ -24,6 +24,20 @@ cat >"$TMP/bin/dropbearkey" <<'EOF'
 echo 'Fingerprint: SHA256:p50+xjUXHLUYiXACnKHQt/Q+0Cgu9DQ/3+YjYJ1d0xk'
 EOF
 printf '#!/bin/sh\necho 0\n' >"$TMP/bin/id"
+cat > "$TMP/bin/curl" <<'EOF_CURL'
+#!/bin/sh
+out='' url=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        --connect-timeout|--max-time) shift 2 ;;
+        -*) shift ;;
+        *) url="$1"; shift ;;
+    esac
+done
+[ -n "$out" ] && [ -n "$url" ] || exit 91
+exec "$(dirname "$0")/wget" -q -O "$out" "$url"
+EOF_CURL
 chmod +x "$TMP/bin/"*
 sed "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.7'/" "$ROOT/bundle.conf" > "$TMP/legacy-bundle"
 for version in 1.7.4 1.7.5; do
