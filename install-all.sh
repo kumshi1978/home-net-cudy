@@ -115,10 +115,17 @@ mkdir -p "$TMP_DIR"
 fetch() {
     url="$1"
     out="$2"
-    if command -v wget >/dev/null 2>&1; then
-        wget -q -T 120 -O "$out" "$url" || fail "download failed: $url"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fL --connect-timeout 10 --max-time 120 -o "$out" "$url" || fail "download failed: $url"
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -4 -fL --connect-timeout 10 --max-time 120 -o "$out" "$url"; then
+            rm -f "$out"
+            if command -v wget >/dev/null 2>&1; then
+                wget -q -T 30 -O "$out" "$url" || fail "download failed with curl and wget: $url"
+            else
+                fail "download failed with curl: $url"
+            fi
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 30 -O "$out" "$url" || fail "download failed with wget: $url"
     else
         fail "wget or curl is required"
     fi
