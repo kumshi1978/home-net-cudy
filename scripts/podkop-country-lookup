@@ -1,12 +1,24 @@
 #!/bin/sh
 # HOME NET Cudy
 # Country lookup with bounded provider fallback
-# Version: 1.4.3
+# Version: 1.4.4
 
 MODE=country
 if [ "${1:-}" = --ip ]; then MODE=ip; shift; fi
-IFACE="${1:-}"
-case "$IFACE" in *[!a-zA-Z0-9_.-]*) exit 2 ;; esac
+# --wan is a mandatory physical-interface scope. Do not fall back to an
+# unbound request, since VPN policy routing can return the VPN exit IP.
+if [ "${1:-}" = --wan ]; then
+    [ "$#" = 1 ] || exit 2
+    IFACE="$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)" || exit 2
+    case "$IFACE" in
+        ''|*[!a-zA-Z0-9_.-]*|awg_*|tun*|wg*) exit 2 ;;
+    esac
+    ip link show dev "$IFACE" >/dev/null 2>&1 || exit 2
+else
+    [ "$#" -le 1 ] || exit 2
+    IFACE="${1:-}"
+    case "$IFACE" in *[!a-zA-Z0-9_.-]*) exit 2 ;; esac
+fi
 TAG="podkop-country"
 LOG_DIR="${PODKOP_COUNTRY_LOG_DIR:-/tmp/podkop-service-health/country-provider-log}"
 LOG_INTERVAL="${PODKOP_COUNTRY_LOG_INTERVAL:-3600}"
