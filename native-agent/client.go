@@ -412,6 +412,50 @@ func prefix512(b []byte) []byte {
 	}
 	return b
 }
+// rebindMatches verifies post-rebind physical slot contents before accepting
+// an acknowledgement. A later drift must never be silently marked applied.
+func (a *app) rebindMatches(spec object) bool {
+    expected := obj(spec["expected"])
+    mapping := obj(spec["mapping"])
+    if len(mapping) == 0 || len(expected) != len(mapping) { return false }
+    for _, target := range keys(mapping) {
+        source := str(mapping[target])
+        snapshot := obj(expected[source])
+        if len(snapshot) != 4 { return false }
+        actual, e := a.observe(target)
+        if e != nil || !equalValues(actual, snapshot) { return false }
+    }
+    return true
+}
+
+// applyPlannedRebind is idempotent only while the real physical binding still
+// matches the successfully applied signed plan. Verification is injectable
+// for regression tests and cannot alter VPN configuration.
+func (a *app) applyPlannedRebind(config object, revision any, spec object, execute func(object) error, verify func(object) bool) error {
+    encoded, e := canonical(spec)
+    if e != nil { return e }
+    digest := hash(encoded)
+    if config["binding_applied_revision"] == revision {
+        if config["binding_applied_digest"] != digest || !verify(spec) {
+            // Stop and request explicit operator action rather than replay a
+            // potentially stale rebind or silently accept diverged slots.
+            config["binding_failed_revision"] = revision
+            if e = save(a.p(configPath), config); e != nil { return e }
+            return errStopped
+        }
+        return nil
+    }
+    if config["binding_failed_revision"] == revision { return nil }
+    if e = execute(spec); e != nil {
+        if e == errBusy { return nil }
+        config["binding_failed_revision"] = revision
+        return save(a.p(configPath), config)
+    }
+    config["binding_applied_revision"] = revision
+    config["binding_applied_digest"] = digest
+    delete(config, "binding_failed_revision")
+    return save(a.p(configPath), config)
+}
 func (a *app) poll() error {
 	config, e := load(a.p(configPath))
 	if os.IsNotExist(e) {
@@ -495,17 +539,7 @@ func (a *app) poll() error {
 			}
 		}
 		if rebind := obj(plan["rebind"]); rebind != nil {
-			if config["binding_failed_revision"] == plan["revision"] {
-				return nil
-			}
-			if e = a.rebind(rebind); e != nil {
-				if e == errBusy {
-					return nil
-				}
-				config["binding_failed_revision"] = plan["revision"]
-				return save(a.p(configPath), config)
-			}
-			return nil
+			return a.applyPlannedRebind(config, plan["revision"], rebind, a.rebind, a.rebindMatches)
 		}
 	}
 	if plan != nil && plan["order"] != nil {
