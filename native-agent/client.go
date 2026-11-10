@@ -412,6 +412,40 @@ func prefix512(b []byte) []byte {
 	}
 	return b
 }
+// applyPlannedRebind is deliberately idempotent across successive signed polls.
+// Keeping the executor injectable makes repeated-poll behavior testable without
+// restarting networking services in unit tests.
+func (a *app) applyPlannedRebind(config object, revision any, spec object, execute func(object) error) error {
+	encoded, e := canonical(spec)
+	if e != nil {
+		return e
+	}
+	digest := hash(encoded)
+	if config["binding_applied_revision"] == revision {
+		// A signed revision cannot be reused with a different rebind payload.
+		if config["binding_applied_digest"] != digest {
+			return errStopped
+		}
+		return nil
+	}
+	if config["binding_failed_revision"] == revision {
+		return nil
+	}
+	if e = execute(spec); e != nil {
+		if e == errBusy {
+			return nil
+		}
+		config["binding_failed_revision"] = revision
+		return save(a.p(configPath), config)
+	}
+	// Persist before returning to the loop; polling the same plan again
+	// must not restart Podkop or failover.
+	config["binding_applied_revision"] = revision
+	config["binding_applied_digest"] = digest
+	delete(config, "binding_failed_revision")
+	return save(a.p(configPath), config)
+}
+
 func (a *app) poll() error {
 	config, e := load(a.p(configPath))
 	if os.IsNotExist(e) {
@@ -495,37 +529,7 @@ func (a *app) poll() error {
 			}
 		}
 		if rebind := obj(plan["rebind"]); rebind != nil {
-			// A signed plan is polled every 60 seconds. A successful rebind
-			// must not run again: it restarts Podkop and failover, briefly
-			// disrupting the active VPN even when no configuration changed.
-			digestBytes, digestErr := canonical(rebind)
-			if digestErr != nil {
-				return digestErr
-			}
-			digest := hash(digestBytes)
-			if config["binding_applied_revision"] == plan["revision"] {
-				// A revision must not silently acquire a different binding.
-				if config["binding_applied_digest"] != digest {
-					return errStopped
-				}
-				return nil
-			}
-			if config["binding_failed_revision"] == plan["revision"] {
-				return nil
-			}
-			if e = a.rebind(rebind); e != nil {
-				if e == errBusy {
-					return nil
-				}
-				config["binding_failed_revision"] = plan["revision"]
-				return save(a.p(configPath), config)
-			}
-			// Persist the successful revision before returning to the poll
-			// loop. If the same plan is delivered again, no service restarts.
-			config["binding_applied_revision"] = plan["revision"]
-			config["binding_applied_digest"] = digest
-			delete(config, "binding_failed_revision")
-			return save(a.p(configPath), config)
+			return a.applyPlannedRebind(config, plan["revision"], rebind, a.rebind)
 		}
 	}
 	if plan != nil && plan["order"] != nil {
