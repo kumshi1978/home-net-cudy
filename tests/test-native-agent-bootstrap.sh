@@ -112,6 +112,7 @@ echo 'PASS bundle aborts before runtime changes when native preflight fails'
 ref=$(sed -n "s/^CONTROL_AGENT_REF='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")
 printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$'
 expected=$(sed -n "s/^CONTROL_AGENT_INSTALL_SHA256='\([^']*\)'$/\1/p" "$ROOT/bundle.conf")
+sha256sum "$ROOT/control-agent/install-native.sh"
 echo "$expected  $ROOT/control-agent/install-native.sh" | sha256sum -c -
 ! grep -Eq 'python3|apk add|opkg install|age-keygen' "$ROOT/control-agent/install-native.sh"
 echo 'PASS release manifest pins a dependency-free native bootstrap'
