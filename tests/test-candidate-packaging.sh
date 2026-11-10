@@ -22,6 +22,14 @@ grep -Fq 'downloading v1.7.10' "$ROOT/install.sh"
 grep -Fq 'releases/download/v1.7.15/home-net-native-agent-1.7.15-linux-arm64.tar.gz' "$ROOT/control-agent/install-native.sh"
 grep -Fq "grep -Fxq 'version=1.7.15'" "$ROOT/control-agent/install-native.sh"
 
+# v1.7.16 is a Monitoring-only patch: reuse the validated native binary,
+# require the new monitoring source ref, and do not enable fleet rollout.
+grep -Fqx "CONTROL_AGENT_REF='d68644275a09efced402a9e289f6ea5c89ff7d84'" "$ROOT/bundle.conf"
+grep -Fqx "MONITORING_BOOTSTRAP_REF='755c581586337435e6792f326092e3d525f4c041'" "$ROOT/bundle.conf"
+grep -Fq "test \"\$(cat native-agent/VERSION)\" = '1.7.15'" "$ROOT/.github/workflows/publish-v1.7.16.yml"
+grep -Fq 'gh release download v1.7.15' "$ROOT/.github/workflows/publish-v1.7.16.yml"
+grep -Fqx "ROLLOUT='manual'" "$ROOT/rollout-policy.conf"
+
 
 # Policy remains mutable after release: packaging must permit the documented
 # manual -> canary -> fleet stages without changing the immutable bundle.
