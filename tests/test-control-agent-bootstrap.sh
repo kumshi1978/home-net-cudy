@@ -29,7 +29,21 @@ case "$url" in
     *) echo 'unexpected component download' >&2; exit 1 ;;
 esac
 EOF
-chmod +x "$TMP/bin/wget"
+cat > "$TMP/bin/curl" <<'EOF_CURL'
+#!/bin/sh
+out='' url=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        --connect-timeout|--max-time) shift 2 ;;
+        -*) shift ;;
+        *) url="$1"; shift ;;
+    esac
+done
+[ -n "$out" ] && [ -n "$url" ] || exit 91
+exec "$(dirname "$0")/wget" -q -O "$out" "$url"
+EOF_CURL
+chmod +x "$TMP/bin/wget" "$TMP/bin/curl"
 sed "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.7'/" "$ROOT/bundle.conf" > "$TMP/legacy-bundle"
 run() {
     PATH="$TMP/bin:$PATH" CONTROL_ROOT="$ROOT" CONTROL_BUNDLE="$TMP/legacy-bundle" CONTROL_FIXTURE="$TMP/control" CONTROL_MARKER="$TMP/marker" \
