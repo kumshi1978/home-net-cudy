@@ -14,7 +14,7 @@ mkdir -p "$BIN"
 cat > "$BIN/ubus" <<'EOF_UBUS'
 #!/bin/sh
 [ "$1 $2 $3" = "call network.interface.wan status" ] || exit 1
-printf '{"l3_device":"%s"}\n' "${MOCK_WAN_DEVICE:-eth0}"
+printf '{"l3_device":"%s"}\n' "${MOCK_WAN_DEVICE-eth0}"
 EOF_UBUS
 cat > "$BIN/jsonfilter" <<'EOF_JSONFILTER'
 #!/bin/sh
@@ -254,6 +254,7 @@ sed '/^wait_for_startup_ready$/,$d' "$DAEMON" > "$TMP/daemon-lib"
  # With different physical WAN and VPN IPs, the health check must not
  # misclassify the VPN as bypassing the tunnel.
  get_wan_ip() { echo 78.139.224.104; }
+ CHECK=/bin/true
  write_state
  grep -qx 'STATUS=OK' "$STATE_FILE"
  grep -qx 'WAN_IP=78.139.224.104' "$STATE_FILE"
