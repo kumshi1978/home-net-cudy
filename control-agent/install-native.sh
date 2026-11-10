@@ -17,10 +17,17 @@ archive=$work/native-agent.tar.gz
 if [ -n "${HOME_NET_NATIVE_ARCHIVE:-}" ]; then
     [ -f "$HOME_NET_NATIVE_ARCHIVE" ] || fail 'local archive missing'
     cp "$HOME_NET_NATIVE_ARCHIVE" "$archive"
-elif command -v wget >/dev/null 2>&1; then
-    wget -q -T 120 -O "$archive" "$url" || fail 'archive download failed'
 elif command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 10 --max-time 120 -o "$archive" "$url" || fail 'archive download failed'
+    if ! curl -4 -fL --connect-timeout 10 --max-time 120 -o "$archive" "$url"; then
+        rm -f "$archive"
+        if command -v wget >/dev/null 2>&1; then
+            wget -q -T 30 -O "$archive" "$url" || fail 'archive download failed with curl and wget'
+        else
+            fail 'archive download failed with curl'
+        fi
+    fi
+elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "$archive" "$url" || fail 'archive download failed with wget'
 else
     fail 'wget or curl required'
 fi
