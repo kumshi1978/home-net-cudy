@@ -144,7 +144,7 @@ install_legacy_control_agent() {
 }
 
 prepare_native_control_agent() {
-    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || return 0
+    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || return 0
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
     valid_payload_sha "${CONTROL_AGENT_REF:-}" || fail 'native bootstrap requires an immutable source'
@@ -159,7 +159,7 @@ prepare_native_control_agent() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ]; then
+    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ]; then
         [ -n "${CONTROL_NATIVE_INSTALLER:-}" ] || fail 'native agent was not preflighted'
         sh "$CONTROL_NATIVE_INSTALLER" --install || fail 'native agent installation failed'
     else
@@ -391,7 +391,7 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         ;;
 esac
 
-if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
     maintenance=/var/run/home-net-vpn-maintenance.lock
     [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
     command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
