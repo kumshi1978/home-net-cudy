@@ -5,7 +5,7 @@ directory="$ROOT/native-agent/dist/native-agent-arm64"
 mkdir -p "$directory"
 cd "$ROOT/native-agent"
 version=$(cat VERSION)
-case "$version" in 1.7.15) ;; *) echo 'Unexpected native release version' >&2; exit 1 ;; esac
+case "$version" in 1.7.17) ;; *) echo 'Unexpected native release version' >&2; exit 1 ;; esac
 commit=$(git rev-parse HEAD)
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -tags netgo,osusergo -ldflags "-s -w -buildid= -X main.version=$version+$commit" -o "$directory/vpn-control-cudy" .
 sed -e 's@home-net-vpn-persist.py@home-net-vpn-persist@g' \
