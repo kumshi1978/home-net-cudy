@@ -22,7 +22,7 @@ case "${0##*/}:$1" in
           network) echo network.awg_backup2=interface ;;
           *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
-    podkop-country-lookup:*) echo DE ;;
+    podkop-country-lookup:*) echo 'GeoIP must not gate verification' >&2; exit 98 ;;
     ip:link) [ ! -f "$TEST/down-third" ] ;;
     awg:showconf)
         if [ "$2" = awg_backup2 ] && [ -e "$TEST/down-third" ]; then exit 1; fi
@@ -37,7 +37,7 @@ case "${0##*/}:$1" in
         else printf 'fixture %s\n' "$(($(date +%s) - 1))"; fi ;;
     curl:-q)
         case "$*" in *'if!awg_'* ) ;; *) exit 1 ;; esac
-        case "$*" in *'/country') echo DE ;; *) echo 203.0.113.1 ;; esac ;;
+        case "$*" in *'/country') echo DE ;; *) echo "${TEST_EXIT_IP:-192.0.2.2}" ;; esac ;;
     pidof:sing-box) exit 0 ;;
     pidof:*) exit 1 ;;
     timeout:10) exit 0 ;;
@@ -122,7 +122,13 @@ test "$(cat "$tmp/active")" = awg_main
 echo "$(($(date +%s) + 60))" >"$backup/staged-at"
 reject verify awg_main awg_backup DE
 echo "$(($(date +%s) - 30))" >"$backup/staged-at"
-reject verify awg_main awg_backup FR
+# GeoIP mismatch is advisory: the expected country no longer gates acceptance.
+run verify awg_main awg_backup FR
+# The tunnel must still exit through its assigned VDS, not WAN/another VPN.
+TEST_EXIT_IP=198.51.100.9
+export TEST_EXIT_IP
+reject verify awg_main awg_backup DE
+unset TEST_EXIT_IP
 touch "$tmp/unhealthy"
 reject verify awg_main awg_backup DE
 rm "$tmp/unhealthy"

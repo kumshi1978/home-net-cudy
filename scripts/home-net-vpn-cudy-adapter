@@ -127,10 +127,11 @@ probe() {
         NF != 2 || $2 !~ /^[0-9]+$/ || $2 <= since || $2 > now || now-$2 > 180 { bad=1 }
         END { exit (NR != 1 || bad) }
     ' || return 1
-    if [ -n "$2" ]; then
-        country=$(podkop-country-lookup "$1") || return 1
-        [ "$country" = "$2" ] || return 1
-    fi
+    # Country databases may disagree or change after provisioning. Country
+    # is diagnostic metadata, never a condition for accepting a working tunnel.
+    # Instead, verify that the bound tunnel exits through its intended VDS.
+    endpoint=$(awg show "$1" endpoints | awk '{print $2}' | endpoint_host) || return 1
+    [ "$ip" = "$endpoint" ] || return 1
 }
 
 switch_to() {
