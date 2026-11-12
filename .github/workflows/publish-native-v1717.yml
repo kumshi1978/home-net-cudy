@@ -1,0 +1,51 @@
+name: Publish pinned native 1.7.17 asset
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-native-v1717.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-v1.7.17-immutable
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'kumshi1978/home-net-cudy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 89eeecf12df14862fffc2476dfc45ab15029753f
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: native-agent/go.sum
+      - name: Build and validate fixed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '89eeecf12df14862fffc2476dfc45ab15029753f'
+          test "$(cat native-agent/VERSION)" = '1.7.17'
+          sh tests/test-vpn-cudy-adapter.sh
+          sh tests/test-vpn-router.sh
+          (cd native-agent && go test -race -count=1 ./... && go vet ./... && sh build-package.sh)
+          cd native-agent/dist
+          sha256sum -c home-net-native-agent-1.7.17-linux-arm64.tar.gz.sha256
+          tar -xOzf home-net-native-agent-1.7.17-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'source_commit=89eeecf12df14862fffc2476dfc45ab15029753f'
+          tar -xOzf home-net-native-agent-1.7.17-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'version=1.7.17'
+          cat home-net-native-agent-1.7.17-linux-arm64.tar.gz.sha256
+      - name: Publish immutable native asset (no fleet rollout)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=v1.7.17-native
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Native release exists; refusing overwrite' >&2
+            exit 1
+          fi
+          gh release create "$tag"             native-agent/dist/home-net-native-agent-1.7.17-linux-arm64.tar.gz             native-agent/dist/home-net-native-agent-1.7.17-linux-arm64.tar.gz.sha256             --repo "$GITHUB_REPOSITORY" --target '89eeecf12df14862fffc2476dfc45ab15029753f'             --title 'HOME NET native agent 1.7.17 — pinned asset'             --notes 'Native ARM64 package for controlled v1.7.17 installation. No automatic rollout; verify SHA-256 before canary.'             --prerelease
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets             --jq '{tag:.tagName,draft:.isDraft,prerelease:.isPrerelease,assets:[.assets[].name]}'
