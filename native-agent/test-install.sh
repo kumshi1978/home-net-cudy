@@ -25,7 +25,19 @@ printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nfixture 999999 0
 EOF
 cat >"$TMP/bin/uci" <<'EOF'
 #!/bin/sh
+if [ -f "$FIXTURE/prepared-fixture" ]; then
+    case "$*" in
+        '-q get podkop.main.connection_type') echo vpn ;;
+        '-q get podkop.main.interface') echo awg_main ;;
+        *) exit 1 ;;
+    esac
+fi
 exit 0
+EOF
+cat >"$TMP/bin/awg" <<'EOF'
+#!/bin/sh
+[ "$*" = 'showconf awg_backup' ] || exit 1
+printf 'synthetic prepared candidate\n'
 EOF
 chmod +x "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH"
@@ -102,6 +114,39 @@ test -f "$FIXTURE/running"
 cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
 cmp "$TMP/podkop.before" "$FIXTURE/etc/config/podkop"
 echo 'PASS installation preserves protected configuration and starts only the agent'
+
+# Prepared-transaction rescue is explicitly bound to one same-boot deployment.
+tx="$FIXTURE/etc/home-net/vpn/transaction"
+mkdir -p "$tx/backup"
+printf '%s\n' prepared >"$tx/phase"
+printf '%s\n' 1d40d2f70e92f42d9bfa87c2967a525a >"$tx/deployment-id"
+cat /proc/sys/kernel/random/boot_id >"$tx/boot-id"
+printf 'awg_main\nawg_backup\nUS\n' >"$tx/metadata"
+printf 'main\n' >"$FIXTURE/etc/home-net/vpn/podkop-section"
+printf 'synthetic prepared candidate\n' | sha256sum | cut -d ' ' -f 1 >"$tx/backup/candidate.sha256"
+touch "$FIXTURE/prepared-fixture"
+if run --preflight; then echo 'prepared without opt-in allowed' >&2; exit 1; fi
+if HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=00000000000000000000000000000000 run --preflight; then
+    echo 'wrong deployment accepted' >&2; exit 1
+fi
+cp "$tx/boot-id" "$TMP/boot-good"
+printf 'stale-boot\n' >"$tx/boot-id"
+if HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight; then
+    echo 'stale boot accepted' >&2; exit 1
+fi
+cp "$TMP/boot-good" "$tx/boot-id"
+printf '%s\n' 0000000000000000000000000000000000000000000000000000000000000000 >"$tx/backup/candidate.sha256"
+if HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight; then
+    echo 'wrong candidate fingerprint accepted' >&2; exit 1
+fi
+printf 'synthetic prepared candidate\n' | sha256sum | cut -d ' ' -f 1 >"$tx/backup/candidate.sha256"
+HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight
+HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --install
+grep -Fxq prepared "$tx/phase"
+cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
+cmp "$TMP/podkop.before" "$FIXTURE/etc/config/podkop"
+echo 'PASS explicit same-boot prepared rescue preserves transaction and network'
+rm -rf "$tx" "$FIXTURE/prepared-fixture"
 
 # Simulate a large already-installed native agent. Its immutable old inode must
 # be retained without reserving another binary-sized flash allocation.
