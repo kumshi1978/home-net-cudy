@@ -42,6 +42,7 @@ jobs:
           sh tests/test-candidate-packaging.sh
           sh tests/test-release-packaging.sh
           sh tests/test-native-agent-bootstrap.sh
+          echo 'PASS v1.7.17 controlled-release smoke'
           if gh release view v1.7.17 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Release already exists; refusing overwrite' >&2
             exit 1
