@@ -55,9 +55,13 @@ case "$phase" in
         fi
         if ! { [ "$(sed -n '1p' "$transaction/metadata")" = awg_main ] &&
                [ "$(sed -n '2p' "$transaction/metadata")" = awg_backup ] &&
-               [ "$(sed -n '3p' "$transaction/metadata")" = US ]; }; then
+               [ -n "$(sed -n '3p' "$transaction/metadata")" ]; }; then
             fail 'prepared transaction targets unexpected VPN slots'
         fi
+        case "$(sed -n '3p' "$transaction/metadata")" in
+            [A-Z][A-Z]) ;;
+            *) fail 'invalid advisory country metadata' ;;
+        esac
         section=$(cat /etc/home-net/vpn/podkop-section 2>/dev/null) ||
             fail 'Podkop section unavailable'
         case "$section" in ''|*[!A-Za-z0-9_]*) fail 'invalid Podkop section' ;; esac
