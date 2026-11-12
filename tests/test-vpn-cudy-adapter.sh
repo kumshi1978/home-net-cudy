@@ -22,7 +22,7 @@ case "${0##*/}:$1" in
           network) echo network.awg_backup2=interface ;;
           *.interface) cat "$TEST/active" ;; *) echo vpn ;; esac ;;
     uci:set) printf '%s\n' "${2#*=}" >"$TEST/active" ;;
-    podkop-country-lookup:*) echo DE ;;
+    podkop-country-lookup:*) echo 'GeoIP must not gate verification' >&2; exit 98 ;;
     ip:link) [ ! -f "$TEST/down-third" ] ;;
     awg:showconf)
         if [ "$2" = awg_backup2 ] && [ -e "$TEST/down-third" ]; then exit 1; fi
