@@ -103,7 +103,7 @@ touch "$TMP/openwrt"
 : >"$EVENTS"
 : >"$URLS"
 if HOME_NET_CONTROL_AUTOREGISTER=1 HOME_NET_STAGE_ONLY=0 HOME_NET_OPENWRT_RELEASE="$TMP/openwrt" HOME_NET_UPDATE_STATE="$TMP/state" HOME_NET_AUTO_UPDATE_MODE=check HOME_NET_SKIP_VERSION_RECORD=1 sh "$TMP/bundle-install" >"$TMP/error" 2>&1; then exit 1; fi
-grep -q 'native agent preflight failed before runtime changes' "$TMP/error"
+grep -q 'native agent preflight failed before runtime changes' "$TMP/error" || { cat "$TMP/error" >&2; exit 1; }
 printf '%s\n' native---preflight >"$TMP/expected"
 cmp "$TMP/expected" "$EVENTS"
 test "$(wc -l <"$URLS")" = 2
