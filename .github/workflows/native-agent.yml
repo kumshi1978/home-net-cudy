@@ -1,7 +1,7 @@
 name: Native router agent
 on:
   push:
-    branches: [feature/native-router-agent, release/v1.7.10]
+    branches: [main, feature/native-router-agent, release/v1.7.10]
   pull_request:
     paths: ['native-agent/**', '.github/workflows/native-agent.yml']
 permissions:
