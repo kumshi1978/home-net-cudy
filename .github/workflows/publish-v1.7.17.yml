@@ -1,0 +1,90 @@
+name: Publish HOME NET 1.7.17
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v1.7.17.yml]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: home-net-release-v1.7.17
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'kumshi1978/home-net-cudy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Validate manifest, provenance and manual rollout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = '1.7.17'
+          test "$(cat native-agent/VERSION)" = '1.7.17'
+          grep -Fxq "HOME_NET_BUNDLE_VERSION='1.7.17'" bundle.conf
+          grep -Fxq "CONTROL_AGENT_REF='e72af4d2393293236cfebe83f7b3ad9ca0cef2e4'" bundle.conf
+          grep -Fxq "CONTROL_AGENT_INSTALL_SHA256='0f0675d8fcaecdbeaf762cb44499769ed25e76a4ed122c6f0330ce900446f1b7'" bundle.conf
+          echo '0f0675d8fcaecdbeaf762cb44499769ed25e76a4ed122c6f0330ce900446f1b7  control-agent/install-native.sh' | sha256sum -c -
+          grep -Fxq "DEFAULT_AUTO_UPDATE_MODE='check'" bundle.conf
+          grep -Fxq "UPDATE_ACTION_CLASS='CONTROLLED'" bundle.conf
+          grep -Fxq "ROLLOUT='manual'" rollout-policy.conf
+          grep -Fxq "RELEASE_TAG='v1.7.13'" rollout-policy.conf
+          grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.17" install-all.sh
+          grep -Fq "HOME_NET_RELEASE_REF:-v1.7.17" install.sh
+          sh tests/test-vpn-cudy-adapter.sh
+          sh tests/test-vpn-router.sh
+          sh tests/test-candidate-packaging.sh
+          sh tests/test-release-packaging.sh
+          sh tests/test-native-agent-bootstrap.sh
+          if gh release view v1.7.17 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing overwrite' >&2
+            exit 1
+          fi
+      - name: Reuse pinned verified native ARM64 archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view v1.7.17-native --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft,.isPrerelease')" = "$(printf 'false\ntrue')"
+          mkdir -p assets
+          gh release download v1.7.17-native --repo "$GITHUB_REPOSITORY" --pattern 'home-net-native-agent-1.7.17-linux-arm64.tar.gz' --dir assets
+          echo 'ef58c89056b15df70d0e0782b8fd790137ba5fcd94a6c01fdd85a835539cdfa9  assets/home-net-native-agent-1.7.17-linux-arm64.tar.gz' | sha256sum -c -
+          tar -xOzf assets/home-net-native-agent-1.7.17-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'source_commit=89eeecf12df14862fffc2476dfc45ab15029753f'
+          tar -xOzf assets/home-net-native-agent-1.7.17-linux-arm64.tar.gz native-agent-arm64/BUILD-INFO | grep -Fxq 'version=1.7.17'
+      - name: Prepare release assets and verify hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp bundle.conf install-all.sh assets/
+          cp docs/releases/v1.7.17.md assets/RELEASE_NOTES.md
+          git archive --format=tar.gz --prefix=home-net-cudy-v1.7.17/ HEAD > assets/home-net-cudy-v1.7.17.tar.gz
+          cat > assets/release-lock.json <<EOF
+          {
+            "release": "v1.7.17",
+            "release_commit": "$GITHUB_SHA",
+            "native_source_commit": "89eeecf12df14862fffc2476dfc45ab15029753f",
+            "native_archive_version": "1.7.17",
+            "native_archive_sha256": "ef58c89056b15df70d0e0782b8fd790137ba5fcd94a6c01fdd85a835539cdfa9",
+            "native_bootstrap_source": "e72af4d2393293236cfebe83f7b3ad9ca0cef2e4",
+            "native_bootstrap_sha256": "0f0675d8fcaecdbeaf762cb44499769ed25e76a4ed122c6f0330ce900446f1b7",
+            "rollout": "manual",
+            "hardware_validated": false
+          }
+          EOF
+          (cd assets && sha256sum bundle.conf install-all.sh RELEASE_NOTES.md release-lock.json home-net-cudy-v1.7.17.tar.gz home-net-native-agent-1.7.17-linux-arm64.tar.gz > SHA256SUMS)
+          (cd assets && sha256sum -c SHA256SUMS)
+      - name: Publish immutable stable release without deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create v1.7.17 assets/bundle.conf assets/install-all.sh assets/RELEASE_NOTES.md assets/release-lock.json assets/SHA256SUMS assets/home-net-cudy-v1.7.17.tar.gz assets/home-net-native-agent-1.7.17-linux-arm64.tar.gz --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'HOME NET 1.7.17 — VPN GeoIP advisory' --notes-file assets/RELEASE_NOTES.md
+          gh release view v1.7.17 --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets --jq '{tagName,isDraft,isPrerelease,assets:[.assets[].name]}'
