@@ -18,6 +18,11 @@ for name in ('/etc/home-net','/usr/bin','/etc/podkop-awg-failover.conf'):
 s=s.replace('/var/run/home-net-vpn-maintenance.lock',sys.argv[4])
 Path(sys.argv[2]).write_text(s)
 PY
+# Legacy three-slot installer pins the historical adapter. For this isolated
+# candidate test, update ONLY the temporary installer's checksum to the
+# candidate payload; keep the shipping legacy installer's immutable pin intact.
+candidate_sha=$(sha256sum "$ROOT/scripts/home-net-vpn-cudy-adapter" | cut -d ' ' -f 1)
+sed -i "s/90ede043f0b19fce694b082c244b9379b1c4875b9677a39b596b75162ec1924a/$candidate_sha/g" "$TMP/install"
 cat > "$TMP/bin/id" <<'MOCK'
 #!/bin/sh
 echo 0
