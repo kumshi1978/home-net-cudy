@@ -35,6 +35,7 @@ jobs:
           grep -Fxq "UPDATE_ACTION_CLASS='CONTROLLED'" bundle.conf
           grep -Fxq "ROLLOUT='manual'" rollout-policy.conf
           grep -Fxq "RELEASE_TAG='v1.7.13'" rollout-policy.conf
+          grep -Fq '[ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ]' install-all.sh
           grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.17" install-all.sh
           grep -Fq "HOME_NET_RELEASE_REF:-v1.7.17" install.sh
           sh tests/test-vpn-cudy-adapter.sh
