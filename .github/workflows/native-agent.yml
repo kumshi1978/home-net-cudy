@@ -30,7 +30,7 @@ jobs:
         working-directory: native-agent
         run: |
           sh build-package.sh
-          cat dist/home-net-native-agent-1.7.17-linux-arm64.tar.gz.sha256
+          cat dist/home-net-native-agent-1.7.18-linux-arm64.tar.gz.sha256
           cat dist/native-agent-arm64/BUILD-INFO
           sha256sum ../control-agent/install-native.sh
           mkdir -p dist/formatted-source

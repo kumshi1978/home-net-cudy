@@ -18,15 +18,71 @@ sha256sum -c SHA256SUMS >/dev/null || fail 'payload integrity failed'
 for path in /etc/home-net /etc/home-net/vpn /etc/home-net/keys /etc/home-net/native-agent-backups /etc/home-net/native-agent-files.sha256 /etc/home-net/vpn/podkop-section /etc/home-net/vpn/failover-lock-version /etc/vpn-control-agent.json /usr/sbin/vpn-control-cudy /usr/bin/home-net-vpn-router /usr/bin/home-net-vpn-persist /usr/bin/home-net-vpn-manifest-validate /etc/home-net/vpn/adapter /etc/init.d/vpn-control-cudy; do
     [ ! -L "$path" ] || fail 'unsafe installation path'
 done
-phase=idle
-[ ! -f /etc/home-net/vpn/transaction/phase ] || phase=$(cat /etc/home-net/vpn/transaction/phase)
-case "$phase" in idle|verified) ;; *) fail 'unfinished transaction requires review' ;; esac
 command -v flock >/dev/null 2>&1 || fail 'flock is required'
 [ ! -L /var/run/home-net-vpn-maintenance.lock ] || fail 'unsafe maintenance path'
 if ! [ /proc/self/fd/9 -ef /var/run/home-net-vpn-maintenance.lock ]; then
     exec 9>>/var/run/home-net-vpn-maintenance.lock
 fi
 flock -n 9 || fail 'VPN maintenance busy'
+
+# Explicit same-boot prepared-transaction rescue. Never alter its phase,
+# network, selected tunnel or secrets while upgrading controller code.
+transaction=/etc/home-net/vpn/transaction
+phase=idle
+[ ! -f "$transaction/phase" ] || phase=$(cat "$transaction/phase")
+case "$phase" in
+    idle|verified) ;;
+    prepared)
+        [ "${HOME_NET_ALLOW_PREPARED_UPGRADE:-0}" = 1 ] ||
+            fail 'prepared transaction: explicit recovery-upgrade opt-in required'
+        expected="${HOME_NET_PREPARED_DEPLOYMENT_ID:-}"
+        case "$expected" in ''|*[!0-9a-f]*) fail 'invalid prepared deployment id' ;; esac
+        if ! { [ "${#expected}" -eq 32 ] &&
+               [ ! -L "$transaction" ] &&
+               [ "$(cat "$transaction/deployment-id" 2>/dev/null)" = "$expected" ]; }; then
+            fail 'prepared transaction ID changed'
+        fi
+        boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) ||
+            fail 'current boot ID unavailable'
+        if ! { [ -n "$boot" ] &&
+               [ "$(cat "$transaction/boot-id" 2>/dev/null)" = "$boot" ]; }; then
+            fail 'prepared transaction belongs to another boot'
+        fi
+        if ! { [ ! -L "$transaction/metadata" ] &&
+               [ ! -L "$transaction/backup" ] &&
+               [ ! -L "$transaction/backup/candidate.sha256" ]; }; then
+            fail 'unsafe prepared transaction paths'
+        fi
+        if ! { [ "$(sed -n '1p' "$transaction/metadata")" = awg_main ] &&
+               [ "$(sed -n '2p' "$transaction/metadata")" = awg_backup ] &&
+               [ -n "$(sed -n '3p' "$transaction/metadata")" ]; }; then
+            fail 'prepared transaction targets unexpected VPN slots'
+        fi
+        case "$(sed -n '3p' "$transaction/metadata")" in
+            [A-Z][A-Z]) ;;
+            *) fail 'invalid advisory country metadata' ;;
+        esac
+        section=$(cat /etc/home-net/vpn/podkop-section 2>/dev/null) ||
+            fail 'Podkop section unavailable'
+        case "$section" in ''|*[!A-Za-z0-9_]*) fail 'invalid Podkop section' ;; esac
+        if ! { [ "$(uci -q get "podkop.$section.connection_type" 2>/dev/null)" = vpn ] &&
+               [ "$(uci -q get "podkop.$section.interface" 2>/dev/null)" = awg_main ]; }; then
+            fail 'active VPN is not awg_main'
+        fi
+        fingerprint=$(cat "$transaction/backup/candidate.sha256" 2>/dev/null) ||
+            fail 'prepared candidate fingerprint missing'
+        printf '%s\n' "$fingerprint" | grep -Eq '^[0-9a-f]{64}$' ||
+            fail 'invalid prepared candidate fingerprint'
+        candidate=$(awg showconf awg_backup 2>/dev/null) ||
+            fail 'prepared candidate interface unavailable'
+        observed=$(printf '%s\n' "$candidate" | sha256sum | cut -d ' ' -f 1)
+        [ "$observed" = "$fingerprint" ] ||
+            fail 'prepared candidate changed; recovery required'
+        unset candidate
+        echo 'HOME NET native agent: verified prepared upgrade opt-in; transaction preserved'
+        ;;
+    *) fail 'unfinished transaction requires review' ;;
+esac
 lock=/var/run/home-net-native-install.lock
 mkdir "$lock" || fail 'installation already running'
 backup=

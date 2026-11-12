@@ -23,7 +23,8 @@ grep -Fq "grep -Fxq 'version=1.7.17'" "$ROOT/control-agent/install-native.sh"
 grep -Fqx "CONTROL_AGENT_REF='e72af4d2393293236cfebe83f7b3ad9ca0cef2e4'" "$ROOT/bundle.conf"
 grep -Fqx "CONTROL_AGENT_INSTALL_SHA256='0f0675d8fcaecdbeaf762cb44499769ed25e76a4ed122c6f0330ce900446f1b7'" "$ROOT/bundle.conf"
 grep -Fqx "MONITORING_BOOTSTRAP_REF='755c581586337435e6792f326092e3d525f4c041'" "$ROOT/bundle.conf"
-test "$(cat "$ROOT/native-agent/VERSION")" = '1.7.17'
+# Allow a separately built native candidate before the immutable bundle pin advances.
+case "$(cat "$ROOT/native-agent/VERSION")" in 1.7.17|1.7.18) ;; *) exit 1 ;; esac
 grep -Fqx "ROLLOUT='manual'" "$ROOT/rollout-policy.conf"
 
 
