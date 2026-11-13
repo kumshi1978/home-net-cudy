@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.19}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.20}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
@@ -144,7 +144,7 @@ install_legacy_control_agent() {
 }
 
 prepare_native_control_agent() {
-    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || return 0
+    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ] || return 0
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
     valid_payload_sha "${CONTROL_AGENT_REF:-}" || fail 'native bootstrap requires an immutable source'
@@ -159,7 +159,7 @@ prepare_native_control_agent() {
 install_control_agent() {
     [ "${HOME_NET_CONTROL_AUTOREGISTER:-1}" != 0 ] || return 0
     [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ] || return 0
-    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ]; then
+    if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ]; then
         [ -n "${CONTROL_NATIVE_INSTALLER:-}" ] || fail 'native agent was not preflighted'
         sh "$CONTROL_NATIVE_INSTALLER" --install || fail 'native agent installation failed'
     else
@@ -391,7 +391,7 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         ;;
 esac
 
-if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
     maintenance=/var/run/home-net-vpn-maintenance.lock
     [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
     command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
@@ -402,24 +402,46 @@ if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.
     case "$phase" in
         idle|verified) ;;
         prepared)
-            # Native-only rescue must be an explicit SSH operator action. The
-            # native installer validates deployment, boot, active route and the
-            # candidate fingerprint while holding this same maintenance lock.
-            [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] ||
-                fail 'prepared rescue is available only in v1.7.19'
-            [ "${HOME_NET_ALLOW_PREPARED_UPGRADE:-0}" = 1 ] &&
-                [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = 1 ] &&
+            # Two manually confirmed recovery entrypoints. The original LuCI
+            # worker supplies HOME_NET_MANAGEMENT_CONTEXT and the confirmed
+            # immutable release; the legacy updater preserves both variables.
+            # Automatic/daemon contexts do not supply this proof. The new
+            # native installer separately rechecks boot, route and fingerprint.
+            case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20) ;;
+                *) fail 'prepared rescue requires a supported release' ;;
+            esac
+            [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = 1 ] &&
                 [ "${HOME_NET_AUTOMATIC_CONTEXT:-0}" != 1 ] &&
-                [ "${HOME_NET_MANAGEMENT_CONTEXT:-0}" != 1 ] &&
                 [ "${HOME_NET_STAGE_ONLY:-0}" = 0 ] ||
-                fail 'prepared recovery requires explicit manual SSH updater opt-in'
+                fail 'prepared recovery is never automatic or stage-only'
             expected="${HOME_NET_PREPARED_DEPLOYMENT_ID:-}"
+            if [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ] &&
+                [ "${HOME_NET_MANAGEMENT_CONTEXT:-0}" = 1 ]; then
+                # Backward-compatible path for the already installed LuCI:
+                # the operator explicitly confirmed this exact release in
+                # the modal, and the management worker bound the release tag.
+                [ "${HOME_NET_CONFIRMED_RELEASE:-}" = v1.7.20 ] ||
+                    fail 'LuCI recovery requires confirmed v1.7.20 release'
+                [ "${HOME_NET_ALLOW_PREPARED_UPGRADE:-0}" != 1 ] ||
+                    fail 'mixed LuCI and SSH recovery context rejected'
+                [ -z "$expected" ] ||
+                    fail 'unexpected manual transaction argument in LuCI'
+                expected=$(cat /etc/home-net/vpn/transaction/deployment-id 2>/dev/null) ||
+                    fail 'prepared deployment ID unavailable'
+                HOME_NET_ALLOW_PREPARED_UPGRADE=1
+                HOME_NET_PREPARED_DEPLOYMENT_ID="$expected"
+                export HOME_NET_ALLOW_PREPARED_UPGRADE HOME_NET_PREPARED_DEPLOYMENT_ID
+            else
+                [ "${HOME_NET_MANAGEMENT_CONTEXT:-0}" != 1 ] &&
+                    [ "${HOME_NET_ALLOW_PREPARED_UPGRADE:-0}" = 1 ] ||
+                    fail 'prepared SSH recovery requires explicit manual opt-in'
+            fi
             case "$expected" in ''|*[!0-9a-f]*) fail 'invalid prepared deployment ID' ;; esac
             [ "${#expected}" -eq 32 ] &&
                 [ "$(cat /etc/home-net/vpn/transaction/deployment-id 2>/dev/null)" = "$expected" ] ||
                 fail 'prepared deployment ID mismatch'
-            # Do not refresh Monitoring, Failover, Podkop, updater or network
-            # during this recovery: install only the protected native agent.
+            # Only native-agent code is replaced, never Failover/Monitoring,
+            # Podkop, updater, VPN interfaces, key material or routes.
             PREPARED_NATIVE_ONLY=1
             ;;
         *) fail 'unfinished VPN transaction requires review before update' ;;
@@ -427,8 +449,7 @@ if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.
 fi
 prepare_native_control_agent
 if [ "${PREPARED_NATIVE_ONLY:-0}" = 1 ]; then
-    [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] ||
-        fail 'unexpected native-only recovery version'
+    case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20) ;; *) fail 'unexpected native-only recovery version' ;; esac
     install_control_agent
     echo 'HOME NET: prepared transaction preserved; native controller upgraded; verify and accept separately.'
     exit 0
