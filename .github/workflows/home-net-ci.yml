@@ -36,6 +36,7 @@ jobs:
           - podkop-background
           - home-net-management
           - home-net-podkop-update
+          - prepared-recovery-bundle
           - candidate-packaging
           - release-packaging
           - component-update-policy
