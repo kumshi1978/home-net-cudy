@@ -1,4 +1,4 @@
-name: Publish HOME NET 1.7.18
+name: Publish HOME NET 1.7.19
 on:
   push:
     branches: [main]
@@ -25,9 +25,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test "$(cat VERSION)" = '1.7.18'
+          test "$(cat VERSION)" = '1.7.19'
           test "$(cat native-agent/VERSION)" = '1.7.18'
-          grep -Fxq "HOME_NET_BUNDLE_VERSION='1.7.18'" bundle.conf
+          grep -Fxq "HOME_NET_BUNDLE_VERSION='1.7.19'" bundle.conf
           grep -Fxq "CONTROL_AGENT_REF='c4e273d419bf4990786ee0dd09cd5744f6838948'" bundle.conf
           grep -Fxq "CONTROL_AGENT_INSTALL_SHA256='3c0513067718a1e6b580f2f4cc2c0a2d4fae86804472c41cdd7ef70fb1163f47'" bundle.conf
           echo '3c0513067718a1e6b580f2f4cc2c0a2d4fae86804472c41cdd7ef70fb1163f47  control-agent/install-native.sh' | sha256sum -c -
@@ -35,7 +35,7 @@ jobs:
           grep -Fxq "UPDATE_ACTION_CLASS='CONTROLLED'" bundle.conf
           grep -Fxq "ROLLOUT='manual'" rollout-policy.conf
           grep -Fxq "RELEASE_TAG='v1.7.13'" rollout-policy.conf
-          grep -Fq '[ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ]' install-all.sh
+          grep -Fq '[ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ]' install-all.sh
           grep -Fq "HOME_NET_BUNDLE_REF:-v1.7.19" install-all.sh
           grep -Fq "HOME_NET_RELEASE_REF:-v1.7.19" install.sh
           sh tests/test-vpn-cudy-adapter.sh
