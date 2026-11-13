@@ -17,7 +17,7 @@ echo "native-$1" >>"$EVENTS"
 EOF
 chmod +x "$MOCK_BOOTSTRAP"
 sha=$(sha256sum "$MOCK_BOOTSTRAP" | cut -d ' ' -f 1)
-sed -e "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.19'/" \
+sed -e "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.20'/" \
     -e "s/^CONTROL_AGENT_INSTALL_SHA256=.*/CONTROL_AGENT_INSTALL_SHA256='$sha'/" \
     "$ROOT/bundle.conf" >"$MOCK_BUNDLE"
 cat >"$TMP/bin/wget" <<'EOF'
@@ -48,15 +48,16 @@ sed -e "s@/etc/home-net/vpn/transaction@$TMP/tx@g" \
     "$ROOT/install-all.sh" >"$TMP/installer"
 run() (
     export PATH="$TMP/bin:$PATH"
-    export HOME_NET_BUNDLE_REF=v1.7.19 HOME_NET_OPENWRT_RELEASE="$TMP/openwrt"
+    export HOME_NET_BUNDLE_REF=v1.7.20 HOME_NET_OPENWRT_RELEASE="$TMP/openwrt"
     export HOME_NET_UPDATE_IN_PROGRESS=1 HOME_NET_STAGE_ONLY=0 HOME_NET_ACTION_CLASS=CONTROLLED
     export HOME_NET_UPDATE_STATE="$TMP/state" HOME_NET_AUTO_UPDATE_MODE=check
     export HOME_NET_ALLOW_PREPARED_UPGRADE="$ALLOW" HOME_NET_PREPARED_DEPLOYMENT_ID="$DEPLOYMENT"
     export HOME_NET_AUTOMATIC_CONTEXT="$AUTOMATIC" HOME_NET_MANAGEMENT_CONTEXT="$MANAGEMENT"
+    export HOME_NET_CONFIRMED_RELEASE="$CONFIRMED"
     export HOME_NET_UPDATER_BACKUP_ROOT="$TMP"
     sh "$TMP/installer" >"$TMP/output" 2>&1
 )
-ALLOW=0 DEPLOYMENT= AUTOMATIC=0 MANAGEMENT=0
+ALLOW=0 DEPLOYMENT= AUTOMATIC=0 MANAGEMENT=0 CONFIRMED=
 reject() {
     : >"$EVENTS"; : >"$URLS"
     if run; then cat "$TMP/output"; echo "FAIL: accepted $1" >&2; exit 1; fi
@@ -66,9 +67,21 @@ reject 'missing opt-in'
 ALLOW=1 DEPLOYMENT=wrong reject 'malformed ID'
 ALLOW=1 DEPLOYMENT=00000000000000000000000000000000 reject 'wrong ID'
 ALLOW=1 DEPLOYMENT="$ID" AUTOMATIC=1 reject 'automatic context'
-ALLOW=1 DEPLOYMENT="$ID" MANAGEMENT=1 reject 'LuCI context'
+ALLOW=1 DEPLOYMENT="$ID" MANAGEMENT=1 reject 'mixed LuCI/SSH context'
+ALLOW=0 DEPLOYMENT= MANAGEMENT=1 CONFIRMED=v1.7.19 reject 'incorrect LuCI target'
+ALLOW=0 DEPLOYMENT= MANAGEMENT=1 CONFIRMED= reject 'unconfirmed LuCI'
+ALLOW=0 DEPLOYMENT= MANAGEMENT=1 CONFIRMED=v1.7.20 AUTOMATIC=1 reject 'automatic LuCI'
+ALLOW=0 DEPLOYMENT= MANAGEMENT=1 CONFIRMED=v1.7.20 AUTOMATIC=0
 : >"$EVENTS"; : >"$URLS"
-ALLOW=1 DEPLOYMENT="$ID" AUTOMATIC=0 MANAGEMENT=0 run || { cat "$TMP/output"; exit 1; }
+run || { cat "$TMP/output"; exit 1; }
+printf '%s\n' native---preflight native---install >"$TMP/expected"
+cmp "$TMP/expected" "$EVENTS"
+test "$(wc -l <"$URLS")" -eq 2
+grep -Fxq prepared "$TMP/tx/phase"
+echo 'PASS legacy LuCI confirmation starts guarded native-only recovery without opt-in bypass'
+
+: >"$EVENTS"; : >"$URLS"
+ALLOW=1 DEPLOYMENT="$ID" AUTOMATIC=0 MANAGEMENT=0 CONFIRMED= run || { cat "$TMP/output"; exit 1; }
 printf '%s\n' native---preflight native---install >"$TMP/expected"
 cmp "$TMP/expected" "$EVENTS"
 test "$(wc -l <"$URLS")" -eq 2
