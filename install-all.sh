@@ -71,7 +71,7 @@ if [ "${1:-}" = "--enroll-fleet-ssh" ]; then
     exit $?
 fi
 
-BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.18}"
+BUNDLE_REF="${HOME_NET_BUNDLE_REF:-v1.7.19}"
 BUNDLE_URL="https://raw.githubusercontent.com/kumshi1978/home-net-cudy/$BUNDLE_REF/bundle.conf"
 TMP_DIR="/tmp/home-net-bundle.$$"
 BUNDLE_CONF="$TMP_DIR/bundle.conf"
