@@ -53,11 +53,16 @@ case "$phase" in
                [ ! -L "$transaction/backup/candidate.sha256" ]; }; then
             fail 'unsafe prepared transaction paths'
         fi
-        if ! { [ "$(sed -n '1p' "$transaction/metadata")" = awg_main ] &&
-               [ "$(sed -n '2p' "$transaction/metadata")" = awg_backup ] &&
-               [ -n "$(sed -n '3p' "$transaction/metadata")" ]; }; then
-            fail 'prepared transaction targets unexpected VPN slots'
-        fi
+        # Metadata is source(active), target(candidate), country. Both
+        # directions are valid: the chosen Podkop path is not fixed.
+        source_slot=$(sed -n '1p' "$transaction/metadata")
+        candidate_slot=$(sed -n '2p' "$transaction/metadata")
+        case "$source_slot:$candidate_slot" in
+            awg_main:awg_backup|awg_backup:awg_main) ;;
+            *) fail 'prepared transaction targets unexpected VPN slots' ;;
+        esac
+        [ -n "$(sed -n '3p' "$transaction/metadata")" ] ||
+            fail 'prepared transaction country missing'
         case "$(sed -n '3p' "$transaction/metadata")" in
             [A-Z][A-Z]) ;;
             *) fail 'invalid advisory country metadata' ;;
@@ -66,14 +71,14 @@ case "$phase" in
             fail 'Podkop section unavailable'
         case "$section" in ''|*[!A-Za-z0-9_]*) fail 'invalid Podkop section' ;; esac
         if ! { [ "$(uci -q get "podkop.$section.connection_type" 2>/dev/null)" = vpn ] &&
-               [ "$(uci -q get "podkop.$section.interface" 2>/dev/null)" = awg_main ]; }; then
-            fail 'active VPN is not awg_main'
+               [ "$(uci -q get "podkop.$section.interface" 2>/dev/null)" = "$source_slot" ]; }; then
+            fail 'active VPN does not match prepared source slot'
         fi
         fingerprint=$(cat "$transaction/backup/candidate.sha256" 2>/dev/null) ||
             fail 'prepared candidate fingerprint missing'
         printf '%s\n' "$fingerprint" | grep -Eq '^[0-9a-f]{64}$' ||
             fail 'invalid prepared candidate fingerprint'
-        candidate=$(awg showconf awg_backup 2>/dev/null) ||
+        candidate=$(awg showconf "$candidate_slot" 2>/dev/null) ||
             fail 'prepared candidate interface unavailable'
         observed=$(printf '%s\n' "$candidate" | sha256sum | cut -d ' ' -f 1)
         [ "$observed" = "$fingerprint" ] ||
