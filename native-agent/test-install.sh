@@ -28,7 +28,7 @@ cat >"$TMP/bin/uci" <<'EOF'
 if [ -f "$FIXTURE/prepared-fixture" ]; then
     case "$*" in
         '-q get podkop.main.connection_type') echo vpn ;;
-        '-q get podkop.main.interface') echo awg_main ;;
+        '-q get podkop.main.interface') echo "${MOCK_SOURCE_SLOT:-awg_main}" ;;
         *) exit 1 ;;
     esac
 fi
@@ -36,7 +36,7 @@ exit 0
 EOF
 cat >"$TMP/bin/awg" <<'EOF'
 #!/bin/sh
-[ "$*" = 'showconf awg_backup' ] || exit 1
+[ "$*" = "showconf ${MOCK_CANDIDATE_SLOT:-awg_backup}" ] || exit 1
 printf 'synthetic prepared candidate\n'
 EOF
 chmod +x "$TMP/bin/"*
@@ -146,6 +146,21 @@ grep -Fxq prepared "$tx/phase"
 cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
 cmp "$TMP/podkop.before" "$FIXTURE/etc/config/podkop"
 echo 'PASS explicit same-boot prepared rescue preserves transaction and network'
+# Regression: backup Cudy may have awg_backup active and awg_main prepared.
+printf 'awg_backup\nawg_main\nUS\n' >"$tx/metadata"
+if MOCK_SOURCE_SLOT=awg_backup HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight; then
+    echo 'reverse slot allowed without matching candidate' >&2; exit 1
+fi
+MOCK_SOURCE_SLOT=awg_backup MOCK_CANDIDATE_SLOT=awg_main HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight
+MOCK_SOURCE_SLOT=awg_backup MOCK_CANDIDATE_SLOT=awg_main HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --install
+grep -Fxq prepared "$tx/phase"
+cmp "$TMP/network.before" "$FIXTURE/etc/config/network"
+cmp "$TMP/podkop.before" "$FIXTURE/etc/config/podkop"
+echo 'PASS reverse prepared upgrade preserves transaction and network'
+printf 'awg_backup\nawg_backup\nUS\n' >"$tx/metadata"
+if MOCK_SOURCE_SLOT=awg_backup MOCK_CANDIDATE_SLOT=awg_backup HOME_NET_ALLOW_PREPARED_UPGRADE=1 HOME_NET_PREPARED_DEPLOYMENT_ID=1d40d2f70e92f42d9bfa87c2967a525a run --preflight; then
+    echo 'same source and target accepted' >&2; exit 1
+fi
 rm -rf "$tx" "$FIXTURE/prepared-fixture"
 
 # Simulate a large already-installed native agent. Its immutable old inode must

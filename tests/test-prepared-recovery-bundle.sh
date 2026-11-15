@@ -90,3 +90,15 @@ grep -Fxq prepared "$TMP/tx/phase"
 grep -Fxq "$ID" "$TMP/tx/deployment-id"
 test ! -e "$TMP/state"
 echo 'PASS prepared rescue: explicit ID, manual-only, native-only, transaction untouched'
+
+# Canary v1.7.21 must support manual SSH rescue, never automatic or LuCI.
+sed -e "s/^HOME_NET_BUNDLE_VERSION=.*/HOME_NET_BUNDLE_VERSION='1.7.21'/" \
+    -e "s/^CONTROL_AGENT_INSTALL_SHA256=.*/CONTROL_AGENT_INSTALL_SHA256='$sha'/" \
+    "$ROOT/bundle.conf" >"$MOCK_BUNDLE"
+ALLOW=0 DEPLOYMENT= AUTOMATIC=0 MANAGEMENT=1 CONFIRMED=v1.7.21 reject 'canary LuCI is not authorized'
+ALLOW=1 DEPLOYMENT="$ID" AUTOMATIC=1 MANAGEMENT=0 CONFIRMED= reject 'canary automatic recovery is blocked'
+: >"$EVENTS"; : >"$URLS"
+ALLOW=1 DEPLOYMENT="$ID" AUTOMATIC=0 MANAGEMENT=0 CONFIRMED= run || { cat "$TMP/output"; exit 1; }
+cmp "$TMP/expected" "$EVENTS"
+grep -Fxq prepared "$TMP/tx/phase"
+echo 'PASS 1.7.21 explicit SSH prepared rescue is native-only and fail-closed'
