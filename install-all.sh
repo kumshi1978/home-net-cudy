@@ -391,7 +391,7 @@ case "$PREVIOUS_ACTIVE_VERSION:$HOME_NET_BUNDLE_VERSION" in
         ;;
 esac
 
-if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
+if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.10 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.11 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.12 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.13 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.14 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.15 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.16 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.17 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.18 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.19 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.20 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.7.21 ]; } && [ "${HOME_NET_STAGE_ONLY:-0}" != 1 ]; then
     maintenance=/var/run/home-net-vpn-maintenance.lock
     [ ! -L "$maintenance" ] || fail 'unsafe maintenance lock'
     command -v flock >/dev/null 2>&1 || fail 'maintenance locking is required'
@@ -407,7 +407,7 @@ if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.
             # immutable release; the legacy updater preserves both variables.
             # Automatic/daemon contexts do not supply this proof. The new
             # native installer separately rechecks boot, route and fingerprint.
-            case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20) ;;
+            case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20|1.7.21) ;;
                 *) fail 'prepared rescue requires a supported release' ;;
             esac
             [ "${HOME_NET_UPDATE_IN_PROGRESS:-0}" = 1 ] &&
@@ -449,7 +449,7 @@ if { [ "$HOME_NET_BUNDLE_VERSION" = 1.7.9 ] || [ "$HOME_NET_BUNDLE_VERSION" = 1.
 fi
 prepare_native_control_agent
 if [ "${PREPARED_NATIVE_ONLY:-0}" = 1 ]; then
-    case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20) ;; *) fail 'unexpected native-only recovery version' ;; esac
+    case "$HOME_NET_BUNDLE_VERSION" in 1.7.19|1.7.20|1.7.21) ;; *) fail 'unexpected native-only recovery version' ;; esac
     install_control_agent
     echo 'HOME NET: prepared transaction preserved; native controller upgraded; verify and accept separately.'
     exit 0
