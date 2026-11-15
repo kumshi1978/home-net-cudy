@@ -1,0 +1,50 @@
+name: Publish native 1.7.21 test-only artifact
+on:
+  push:
+    branches:
+      - fix/prepared-upgrade-reverse-slot-1-7-21
+    paths:
+      - .github/workflows/publish-native-1.7.21-canary.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Download exact completed and reviewed Actions artifact
+        run: |
+          set -euo pipefail
+          mkdir artifact
+          gh run download 43710101807 -R "$REPO" -n native-agent-candidate -D artifact
+          test -f artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz
+          printf '%s  %s\n' \
+            9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d \
+            artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz | sha256sum -c -
+          printf '%s  %s\n' \
+            9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d \
+            home-net-native-agent-1.7.21-linux-arm64.tar.gz > artifact/SHA256SUMS-CANARY
+          test "$(cat artifact/native-agent-arm64/BUILD-INFO | grep -c '^version=1.7.21$')" -eq 1
+          grep -Fxq 'source_commit=46e58b826d04052d98a66aa064de0fb0fd7e18c3' artifact/native-agent-arm64/BUILD-INFO
+      - name: Publish immutable canary-only prerelease
+        run: |
+          set -euo pipefail
+          TAG=v1.7.21-native-canary
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing canary release" >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz \
+            artifact/SHA256SUMS-CANARY \
+            -R "$REPO" \
+            --target 46e58b826d04052d98a66aa064de0fb0fd7e18c3 \
+            --title "HOME NET native agent 1.7.21 — backup Cudy canary only" \
+            --notes "Pre-release only. Native package verified by SHA256 9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d. For apartment-backup Cudy manual preflight only; not a HOME NET bundle stable release. No primary-router installation or automatic fleet update." \
+            --prerelease
