@@ -42,7 +42,7 @@ jobs:
           retention-days: 7
 
   publish-canary-1-7-21:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/prepared-upgrade-reverse-slot-1-7-21'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/fix/prepared-upgrade-reverse-slot-1-7-21') || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/prepared-upgrade-reverse-slot-1-7-21' && github.event.pull_request.head.repo.full_name == github.repository)
     needs: test-build
     runs-on: ubuntu-24.04
     permissions:
