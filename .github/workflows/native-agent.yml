@@ -1,7 +1,7 @@
 name: Native router agent
 on:
   push:
-    branches: [main, feature/native-router-agent, release/v1.7.10]
+    branches: [main, feature/native-router-agent, release/v1.7.10, fix/prepared-upgrade-reverse-slot-1-7-21]
   pull_request:
     paths: ['native-agent/**', '.github/workflows/native-agent.yml']
 permissions:
@@ -40,3 +40,38 @@ jobs:
           name: native-agent-candidate
           path: native-agent/dist/
           retention-days: 7
+
+  publish-canary-1-7-21:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/prepared-upgrade-reverse-slot-1-7-21'
+    needs: test-build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Publish exact pinned pre-release asset, never stable
+        run: |
+          set -euo pipefail
+          mkdir artifact
+          gh run download 43710101807 -R "$REPO" -n native-agent-candidate -D artifact
+          test -f artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz
+          echo '9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d  artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz' | sha256sum -c -
+          grep -Fxq 'version=1.7.21' artifact/native-agent-arm64/BUILD-INFO
+          grep -Fxq 'source_commit=46e58b826d04052d98a66aa064de0fb0fd7e18c3' artifact/native-agent-arm64/BUILD-INFO
+          echo '9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d  home-net-native-agent-1.7.21-linux-arm64.tar.gz' >artifact/SHA256SUMS-CANARY
+          TAG=v1.7.21-native-canary
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+            echo 'Canary already published, refusing to overwrite'
+            exit 1
+          fi
+          gh release create "$TAG" \
+            artifact/home-net-native-agent-1.7.21-linux-arm64.tar.gz \
+            artifact/SHA256SUMS-CANARY \
+            -R "$REPO" \
+            --target 46e58b826d04052d98a66aa064de0fb0fd7e18c3 \
+            --title 'HOME NET native 1.7.21 — backup-only canary' \
+            --notes 'Test-only prerelease. No stable bundle, no fleet rollout. SHA256 9131f96fb1df90622fe4d21b007294652c4406ecf46f51774d6302a54663109d.' \
+            --prerelease
